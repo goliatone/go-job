@@ -14,9 +14,8 @@ type Engine struct {
 }
 
 func New(opts ...Option) *Engine {
-	e := &Engine{
-		BaseEngine: job.NewBaseEngine("javascript", ".js"),
-	}
+	e := &Engine{}
+	e.BaseEngine = job.NewBaseEngine(e, "javascript", ".js")
 
 	for _, opt := range opts {
 		if opt != nil {
