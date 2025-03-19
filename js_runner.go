@@ -12,7 +12,7 @@ type JSEngine struct {
 	*BaseEngine
 }
 
-func NewJSEngine(opts ...JSOption) *JSEngine {
+func NewJSRunner(opts ...JSOption) *JSEngine {
 	e := &JSEngine{}
 	e.BaseEngine = NewBaseEngine(e, "javascript", ".js")
 
