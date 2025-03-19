@@ -5,14 +5,14 @@ import (
 	"fmt"
 )
 
-type FileSystemTaskCreator struct {
+type taskCreator struct {
 	engines        []Engine
 	errorHandler   func(error)
 	sourceProvider SourceProvider
 }
 
-func NewFileSystemTaskCreator(provider SourceProvider, engines []Engine) *FileSystemTaskCreator {
-	return &FileSystemTaskCreator{
+func NewTaskCreator(provider SourceProvider, engines []Engine) *taskCreator {
+	return &taskCreator{
 		sourceProvider: provider,
 		engines:        engines,
 		errorHandler: func(err error) {
@@ -22,12 +22,12 @@ func NewFileSystemTaskCreator(provider SourceProvider, engines []Engine) *FileSy
 }
 
 // WithErrorHandler sets a custom error handler
-func (f *FileSystemTaskCreator) WithErrorHandler(handler func(error)) *FileSystemTaskCreator {
+func (f *taskCreator) WithErrorHandler(handler func(error)) *taskCreator {
 	f.errorHandler = handler
 	return f
 }
 
-func (r *FileSystemTaskCreator) CreateTasks(ctx context.Context) ([]Task, error) {
+func (r *taskCreator) CreateTasks(ctx context.Context) ([]Task, error) {
 	scripts, err := r.sourceProvider.ListScripts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list scripts: %w", err)
