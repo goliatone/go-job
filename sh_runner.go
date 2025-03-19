@@ -18,7 +18,7 @@ type ShellEngine struct {
 	environment []string
 }
 
-func NewShellEngine(opts ...ShellOption) *ShellEngine {
+func NewShellRunner(opts ...ShellOption) *ShellEngine {
 	e := &ShellEngine{
 		shell:     "/bin/sh",
 		shellArgs: []string{"-c"},
