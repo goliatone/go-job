@@ -52,7 +52,7 @@ func (msg ExecutionMessage) Validate() error {
 // Task represents a schedulable job discovered from the filesystem
 type Task interface {
 	GetID() string
-	GetHandler() command.Commander[ExecutionMessage]
+	GetHandler() command.CommandFunc[ExecutionMessage]
 	GetHandlerConfig() command.HandlerConfig
 	GetConfig() Config
 }
