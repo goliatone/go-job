@@ -19,15 +19,17 @@ type BaseEngine struct {
 	FS             fs.FS
 	SourceProvider SourceProvider
 	EngineType     string
+	Self           Engine
 }
 
-func NewBaseEngine(engingeType string, exts ...string) *BaseEngine {
+func NewBaseEngine(self Engine, engingeType string, exts ...string) *BaseEngine {
 	return &BaseEngine{
 		Timeout:        30 * time.Second,
 		MetadataParser: NewYAMLMetadataParser(),
 		FS:             os.DirFS("."),
 		EngineType:     engingeType,
 		FileExtensions: exts,
+		Self:           self,
 	}
 }
 
@@ -56,7 +58,7 @@ func (e *BaseEngine) ParseJob(path string, content []byte) (Task, error) {
 	}
 
 	jobID := filepath.Base(path)
-	job := NewBaseTask(jobID, path, e.EngineType, config.ToMap(), scriptContent, e)
+	job := NewBaseTask(jobID, path, e.EngineType, config.ToMap(), scriptContent, e.Self)
 	return job, nil
 }
 
@@ -95,8 +97,4 @@ func (e *BaseEngine) GetExecutionTimeout(ctx context.Context) time.Duration {
 func (e *BaseEngine) GetExecutionContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	execTimeout := e.GetExecutionTimeout(ctx)
 	return context.WithTimeout(ctx, execTimeout)
-}
-
-func (e *BaseEngine) Execute(ctx context.Context, msg ExecutionMessage) error {
-	panic("method Execute must be implemented by the specific engine")
 }
