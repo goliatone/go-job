@@ -8,6 +8,21 @@ import (
 	"github.com/goliatone/go-command"
 )
 
+type SourceProvider interface {
+	GetScript(path string) (content []byte, err error)
+	ListScripts(ctx context.Context) ([]ScriptInfo, error)
+}
+
+type ScriptInfo struct {
+	ID      string
+	Path    string
+	Content []byte
+}
+
+type TaskCreator interface {
+	CreateTasks(ctx context.Context) ([]Task, error)
+}
+
 // ExecutionMessage represents a request to execute a job script
 type ExecutionMessage struct {
 	command.BaseMessage
@@ -49,7 +64,7 @@ type Engine interface {
 	Execute(ctx context.Context, msg ExecutionMessage) error
 }
 
-type Runner interface {
+type TaskRunner interface {
 	Start(ctx context.Context) error
 	Stop(ctx context.Context) error
 	RegisteredTasks() []Task
