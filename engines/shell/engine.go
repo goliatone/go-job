@@ -21,10 +21,10 @@ type Engine struct {
 
 func New(opts ...Option) *Engine {
 	e := &Engine{
-		BaseEngine: job.NewBaseEngine("shell", ".sh", ".bash"),
-		shell:      "/bin/sh",
-		shellArgs:  []string{"-c"},
+		shell:     "/bin/sh",
+		shellArgs: []string{"-c"},
 	}
+	e.BaseEngine = job.NewBaseEngine(e, "shell", ".sh", ".bash")
 
 	for _, opt := range opts {
 		if opt != nil {
