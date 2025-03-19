@@ -4,13 +4,10 @@ import (
 	"context"
 	"fmt"
 	"sync"
-
-	"github.com/goliatone/go-command"
 )
 
 type Runner struct {
 	mx       sync.RWMutex
-	engines  []Engine
 	registry Registry
 
 	parser       MetadataParser
@@ -38,10 +35,6 @@ func NewRunner(opts ...Option) *Runner {
 }
 
 func (r *Runner) Start(ctx context.Context) error {
-	if len(r.engines) == 0 {
-		return command.WrapError("FileSystemjob", "no engines registered", nil)
-	}
-
 	for _, make := range r.taskCreators {
 		tasks, err := make.CreateTasks(ctx)
 		if err != nil {
@@ -54,7 +47,6 @@ func (r *Runner) Start(ctx context.Context) error {
 			}
 		}
 	}
-
 	return nil
 }
 
@@ -64,15 +56,4 @@ func (r *Runner) Stop(_ context.Context) error {
 
 func (r *Runner) RegisteredTasks() []Task {
 	return r.registry.List()
-}
-
-func (r *Runner) AddEngine(engine Engine) {
-	r.mx.Lock()
-	defer r.mx.Unlock()
-	for _, existing := range r.engines {
-		if existing.Name() == engine.Name() {
-			return
-		}
-	}
-	r.engines = append(r.engines, engine)
 }
