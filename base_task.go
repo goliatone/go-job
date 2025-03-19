@@ -3,6 +3,8 @@ package job
 import (
 	"context"
 	"fmt"
+	"maps"
+	"reflect"
 	"time"
 
 	"github.com/goliatone/go-command"
@@ -24,25 +26,40 @@ func (j *baseTask) GetID() string {
 	return j.id
 }
 
-func (j *baseTask) GetHandler() command.CommandFunc[ExecutionMessage] {
-	return func(ctx context.Context, msg ExecutionMessage) error {
-		// TODO: Do i need this?
-		modifiedMsg := msg
-		modifiedMsg.JobID = j.id
-		modifiedMsg.ScriptPath = j.scriptPath
+func (j *baseTask) GetHandler() command.CommandFunc[command.Message] {
+	return func(ctx context.Context, msg command.Message) error {
 
-		if modifiedMsg.Config.Schedule == "" {
-			modifiedMsg.Config = j.config
+		emsg := ExecutionMessage{
+			JobID:      j.id,
+			ScriptPath: j.scriptPath,
+			Config:     j.config,
+			Parameters: make(map[string]any),
 		}
+		emsg.Parameters["script"] = j.scriptContent
 
-		if _, hasScript := modifiedMsg.Parameters["script"]; !hasScript && j.scriptContent != "" {
-			if modifiedMsg.Parameters == nil {
-				modifiedMsg.Parameters = make(map[string]any)
+		if msg != nil {
+			if m, ok := msg.(ExecutionMessage); ok {
+				if m.JobID != "" {
+					emsg.JobID = m.JobID
+				}
+
+				if m.ScriptPath != "" {
+					emsg.ScriptPath = m.ScriptPath
+				}
+
+				if m.Parameters != nil {
+					maps.Copy(emsg.Parameters, m.Parameters)
+				}
+
+				if !reflect.ValueOf(m.Config).IsZero() {
+					emsg.Config = m.Config
+				}
 			}
-			modifiedMsg.Parameters["script"] = j.scriptContent
 		}
+
 		fmt.Println("executing engine " + j.engine.Name())
-		return j.engine.Execute(ctx, modifiedMsg)
+
+		return j.engine.Execute(ctx, emsg)
 	}
 }
 
