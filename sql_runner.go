@@ -17,7 +17,7 @@ type SQLEngine struct {
 	scriptBoundary string
 }
 
-func NewSQLEngine(opts ...SQLOption) *SQLEngine {
+func NewSQLRunner(opts ...SQLOption) *SQLEngine {
 	e := &SQLEngine{
 		scriptBoundary: "--job",
 	}
