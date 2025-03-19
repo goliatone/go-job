@@ -1,4 +1,4 @@
-package sql
+package job
 
 import (
 	"context"
@@ -7,22 +7,21 @@ import (
 	"strings"
 
 	"github.com/goliatone/go-command"
-	"github.com/goliatone/go-job"
 )
 
-type Engine struct {
-	*job.BaseEngine
+type SQLEngine struct {
+	*BaseEngine
 	db             *sql.DB
 	driverName     string
 	dataSourceName string
 	scriptBoundary string
 }
 
-func New(opts ...Option) *Engine {
-	e := &Engine{
+func NewSQLEngine(opts ...SQLOption) *SQLEngine {
+	e := &SQLEngine{
 		scriptBoundary: "--job",
 	}
-	e.BaseEngine = job.NewBaseEngine(e, "sql", ".sql")
+	e.BaseEngine = NewBaseEngine(e, "sql", ".sql")
 
 	for _, opt := range opts {
 		if opt != nil {
@@ -33,7 +32,7 @@ func New(opts ...Option) *Engine {
 	return e
 }
 
-func (e *Engine) Execute(ctx context.Context, msg job.ExecutionMessage) error {
+func (e *SQLEngine) Execute(ctx context.Context, msg ExecutionMessage) error {
 	scriptContent, err := e.GetScriptContent(msg)
 	if err != nil {
 		return err
@@ -65,7 +64,7 @@ func (e *Engine) Execute(ctx context.Context, msg job.ExecutionMessage) error {
 	return e.executeDirectly(execCtx, db, scriptContent)
 }
 
-func (e *Engine) getDBConnection(ctx context.Context, msg job.ExecutionMessage) (*sql.DB, error) {
+func (e *SQLEngine) getDBConnection(ctx context.Context, msg ExecutionMessage) (*sql.DB, error) {
 	if e.db != nil {
 		return e.db, nil
 	}
@@ -101,7 +100,7 @@ func (e *Engine) getDBConnection(ctx context.Context, msg job.ExecutionMessage) 
 	return db, nil
 }
 
-func (e *Engine) executeInTransaction(ctx context.Context, db *sql.DB, script string) error {
+func (e *SQLEngine) executeInTransaction(ctx context.Context, db *sql.DB, script string) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return command.WrapError("SQLTransactionError", "failed to start transaction", err)
@@ -127,7 +126,7 @@ func (e *Engine) executeInTransaction(ctx context.Context, db *sql.DB, script st
 	return nil
 }
 
-func (e *Engine) executeDirectly(ctx context.Context, db *sql.DB, script string) error {
+func (e *SQLEngine) executeDirectly(ctx context.Context, db *sql.DB, script string) error {
 	// Split script into individual statements
 	statements := splitSQLStatements(script, e.scriptBoundary)
 

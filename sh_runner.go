@@ -1,4 +1,4 @@
-package shell
+package job
 
 import (
 	"bytes"
@@ -8,23 +8,22 @@ import (
 	"os/exec"
 
 	"github.com/goliatone/go-command"
-	"github.com/goliatone/go-job"
 )
 
-type Engine struct {
-	*job.BaseEngine
+type ShellEngine struct {
+	*BaseEngine
 	shell       string
 	shellArgs   []string
 	workDir     string
 	environment []string
 }
 
-func New(opts ...Option) *Engine {
-	e := &Engine{
+func NewShellEngine(opts ...ShellOption) *ShellEngine {
+	e := &ShellEngine{
 		shell:     "/bin/sh",
 		shellArgs: []string{"-c"},
 	}
-	e.BaseEngine = job.NewBaseEngine(e, "shell", ".sh", ".bash")
+	e.BaseEngine = NewBaseEngine(e, "shell", ".sh", ".bash")
 
 	for _, opt := range opts {
 		if opt != nil {
@@ -35,7 +34,7 @@ func New(opts ...Option) *Engine {
 	return e
 }
 
-func (e *Engine) Execute(ctx context.Context, msg job.ExecutionMessage) error {
+func (e *ShellEngine) Execute(ctx context.Context, msg ExecutionMessage) error {
 	scriptContent, err := e.GetScriptContent(msg)
 	if err != nil {
 		return err

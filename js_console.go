@@ -1,4 +1,4 @@
-package js
+package job
 
 import (
 	"fmt"
@@ -6,7 +6,7 @@ import (
 	"github.com/dop251/goja"
 )
 
-func (e *Engine) setupConsole(vm *goja.Runtime) error {
+func (e *JSEngine) setupConsole(vm *goja.Runtime) error {
 	console := map[string]any{
 		"log": func(args ...any) {
 			fmt.Printf("[JS] [INFO] %v\n", args)

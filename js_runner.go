@@ -1,4 +1,4 @@
-package js
+package job
 
 import (
 	"context"
@@ -6,16 +6,15 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/goliatone/go-command"
-	"github.com/goliatone/go-job"
 )
 
-type Engine struct {
-	*job.BaseEngine
+type JSEngine struct {
+	*BaseEngine
 }
 
-func New(opts ...Option) *Engine {
-	e := &Engine{}
-	e.BaseEngine = job.NewBaseEngine(e, "javascript", ".js")
+func NewJSEngine(opts ...JSOption) *JSEngine {
+	e := &JSEngine{}
+	e.BaseEngine = NewBaseEngine(e, "javascript", ".js")
 
 	for _, opt := range opts {
 		if opt != nil {
@@ -26,7 +25,7 @@ func New(opts ...Option) *Engine {
 	return e
 }
 
-func (e *Engine) Execute(ctx context.Context, msg job.ExecutionMessage) error {
+func (e *JSEngine) Execute(ctx context.Context, msg ExecutionMessage) error {
 	scriptContent, err := e.GetScriptContent(msg)
 	if err != nil {
 		return err

@@ -1,4 +1,4 @@
-package js
+package job
 
 import (
 	"context"
@@ -30,7 +30,7 @@ type FetchResponse struct {
 	Body       []byte            `json:"-"`
 }
 
-func (e *Engine) setupFetch(vm *goja.Runtime) error {
+func (e *JSEngine) setupFetch(vm *goja.Runtime) error {
 	return vm.Set("fetch", func(call goja.FunctionCall) goja.Value {
 		promise, resolve, reject := vm.NewPromise()
 
@@ -94,7 +94,7 @@ func (e *Engine) setupFetch(vm *goja.Runtime) error {
 	})
 }
 
-func (e *Engine) executeFetch(url string, options FetchOptions) (*FetchResponse, error) {
+func (e *JSEngine) executeFetch(url string, options FetchOptions) (*FetchResponse, error) {
 	ctx, cancel := context.WithTimeout(
 		context.Background(),
 		time.Duration(options.Timeout)*time.Microsecond,
@@ -155,7 +155,7 @@ func (e *Engine) executeFetch(url string, options FetchOptions) (*FetchResponse,
 	}, nil
 }
 
-func (e *Engine) createJSResponse(vm *goja.Runtime, resp *FetchResponse) goja.Value {
+func (e *JSEngine) createJSResponse(vm *goja.Runtime, resp *FetchResponse) goja.Value {
 	responseObj := vm.NewObject()
 
 	_ = responseObj.Set("status", resp.Status)
