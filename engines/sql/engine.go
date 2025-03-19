@@ -20,9 +20,9 @@ type Engine struct {
 
 func New(opts ...Option) *Engine {
 	e := &Engine{
-		BaseEngine:     job.NewBaseEngine("sql", ".sql"),
 		scriptBoundary: "--job",
 	}
+	e.BaseEngine = job.NewBaseEngine(e, "sql", ".sql")
 
 	for _, opt := range opts {
 		if opt != nil {
