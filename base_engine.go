@@ -3,7 +3,6 @@ package job
 import (
 	"context"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -18,6 +17,7 @@ type BaseEngine struct {
 	Timeout        time.Duration
 	MetadataParser MetadataParser
 	FS             fs.FS
+	SourceProvider SourceProvider
 	EngineType     string
 }
 
@@ -65,17 +65,7 @@ func (e *BaseEngine) GetScriptContent(msg ExecutionMessage) (string, error) {
 		return content, nil
 	}
 
-	file, err := e.FS.Open(msg.ScriptPath)
-	if err != nil {
-		return "", command.WrapError(
-			fmt.Sprintf("%sEngineError", e.EngineType),
-			"failed to read script file",
-			err,
-		)
-	}
-	defer file.Close()
-
-	content, err := io.ReadAll(file)
+	content, err := e.SourceProvider.GetScript(msg.ScriptPath)
 	if err != nil {
 		return "", command.WrapError(
 			fmt.Sprintf("%sEngineError", e.EngineType),
