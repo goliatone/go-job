@@ -68,7 +68,6 @@ type TaskRunner interface {
 	Start(ctx context.Context) error
 	Stop(ctx context.Context) error
 	RegisteredTasks() []Task
-	AddEngine(engine Engine)
 }
 
 type Registry interface {
