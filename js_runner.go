@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja_nodejs/require"
 	"github.com/goliatone/go-command"
 )
 
@@ -35,6 +36,8 @@ func (e *JSEngine) Execute(ctx context.Context, msg ExecutionMessage) error {
 	defer cancel()
 
 	vm := goja.New()
+	registry := require.NewRegistry()
+	registry.Enable(vm)
 
 	if err := e.setupConsole(vm); err != nil {
 		return command.WrapError("JSEngineError", "failed to set console object", err)
