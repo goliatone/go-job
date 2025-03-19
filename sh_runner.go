@@ -69,14 +69,19 @@ func (e *ShellEngine) Execute(ctx context.Context, msg ExecutionMessage) error {
 	// 	"stdout": stdout.String(),
 	// 	"stderr": stderr.String(),
 	// }
+	fmt.Println("=== EXECUTE SH ====")
+	fmt.Println(msg.ScriptPath)
 
 	if err := cmd.Run(); err != nil {
+		fmt.Println(stderr.String())
 		return command.WrapError(
 			"ShellExecutionError",
 			fmt.Sprintf("script execution failed: %v\nStderr: %s", err, stderr.String()),
 			err,
 		)
 	}
+
+	fmt.Println(stdout.String())
 
 	if exitCode := cmd.ProcessState.ExitCode(); exitCode != 0 {
 		return command.WrapError(
