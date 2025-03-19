@@ -2,6 +2,7 @@ package job
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/goliatone/go-command"
@@ -17,12 +18,14 @@ type baseTask struct {
 	engine        Engine
 }
 
+var _ Task = &baseTask{}
+
 func (j *baseTask) GetID() string {
 	return j.id
 }
 
-func (j *baseTask) GetHandler() command.Commander[ExecutionMessage] {
-	return command.CommandFunc[ExecutionMessage](func(ctx context.Context, msg ExecutionMessage) error {
+func (j *baseTask) GetHandler() command.CommandFunc[ExecutionMessage] {
+	return func(ctx context.Context, msg ExecutionMessage) error {
 		// TODO: Do i need this?
 		modifiedMsg := msg
 		modifiedMsg.JobID = j.id
@@ -38,9 +41,9 @@ func (j *baseTask) GetHandler() command.Commander[ExecutionMessage] {
 			}
 			modifiedMsg.Parameters["script"] = j.scriptContent
 		}
-
+		fmt.Println("executing engine " + j.engine.Name())
 		return j.engine.Execute(ctx, modifiedMsg)
-	})
+	}
 }
 
 func (j *baseTask) GetHandlerConfig() command.HandlerConfig {
