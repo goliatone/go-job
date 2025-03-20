@@ -3,8 +3,6 @@ package job
 import (
 	"context"
 	"fmt"
-	"maps"
-	"reflect"
 	"time"
 
 	"github.com/goliatone/go-command"
@@ -26,37 +24,16 @@ func (j *baseTask) GetID() string {
 	return j.id
 }
 
-func (j *baseTask) GetHandler() command.CommandFunc[command.Message] {
-	return func(ctx context.Context, msg command.Message) error {
+func (j *baseTask) GetHandler() command.CommandFunc[ExecutionMessage] {
+	return func(ctx context.Context, msg ExecutionMessage) error {
 
-		emsg := ExecutionMessage{
+		emsg := &ExecutionMessage{
 			JobID:      j.id,
 			ScriptPath: j.scriptPath,
 			Config:     j.config,
 			Parameters: make(map[string]any),
 		}
 		emsg.Parameters["script"] = j.scriptContent
-
-		if msg != nil {
-			if m, ok := msg.(ExecutionMessage); ok {
-				if m.JobID != "" {
-					emsg.JobID = m.JobID
-				}
-
-				if m.ScriptPath != "" {
-					emsg.ScriptPath = m.ScriptPath
-				}
-
-				if m.Parameters != nil {
-					maps.Copy(emsg.Parameters, m.Parameters)
-				}
-
-				if !reflect.ValueOf(m.Config).IsZero() {
-					emsg.Config = m.Config
-				}
-			}
-		}
-
 		fmt.Println("executing engine " + j.engine.Name())
 
 		return j.engine.Execute(ctx, emsg)
