@@ -32,8 +32,8 @@ func NewSQLRunner(opts ...SQLOption) *SQLEngine {
 	return e
 }
 
-func (e *SQLEngine) Execute(ctx context.Context, msg ExecutionMessage) error {
-	scriptContent, err := e.GetScriptContent(msg)
+func (e *SQLEngine) Execute(ctx context.Context, msg *ExecutionMessage) error {
+	scriptContent, err := e.GetScriptContent(*msg)
 	if err != nil {
 		return err
 	}
@@ -41,7 +41,7 @@ func (e *SQLEngine) Execute(ctx context.Context, msg ExecutionMessage) error {
 	execCtx, cancel := e.GetExecutionContext(ctx)
 	defer cancel()
 
-	db, err := e.getDBConnection(execCtx, msg)
+	db, err := e.getDBConnection(execCtx, *msg)
 	if err != nil {
 		return command.WrapError("SQLEngineError", "failed to establish database connection", err)
 	}
