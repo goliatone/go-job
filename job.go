@@ -26,10 +26,11 @@ type TaskCreator interface {
 // ExecutionMessage represents a request to execute a job script
 type ExecutionMessage struct {
 	command.BaseMessage
-	JobID      string
-	ScriptPath string
-	Config     Config
-	Parameters map[string]any
+	JobID          string
+	ScriptPath     string
+	Config         Config
+	Parameters     map[string]any
+	OutputCallback func(stdout, stderr string)
 }
 
 // Type returns the message type for the command system
@@ -52,7 +53,7 @@ func (msg ExecutionMessage) Validate() error {
 // Task represents a schedulable job discovered from the filesystem
 type Task interface {
 	GetID() string
-	GetHandler() command.CommandFunc[ExecutionMessage]
+	GetHandler() command.CommandFunc[*ExecutionMessage]
 	GetHandlerConfig() command.HandlerConfig
 	GetConfig() Config
 }
@@ -61,7 +62,7 @@ type Engine interface {
 	Name() string
 	ParseJob(path string, content []byte) (Task, error)
 	CanHandle(path string) bool
-	Execute(ctx context.Context, msg ExecutionMessage) error
+	Execute(ctx context.Context, msg *ExecutionMessage) error
 }
 
 type TaskRunner interface {
