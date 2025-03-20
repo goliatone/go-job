@@ -48,3 +48,21 @@ func WithJSMetadataParser(parser MetadataParser) JSOption {
 		}
 	}
 }
+
+func WithJSPathResolver(resolver func(base, path string) string) JSOption {
+	return func(j *JSEngine) {
+		j.pathResolver = resolver
+	}
+}
+
+func WithJSModuleLoader(loader func(path string) ([]byte, error)) JSOption {
+	return func(j *JSEngine) {
+		j.moduleLoader = loader
+	}
+}
+
+func WithJSPanicHandler(handler func(funcName string, fields ...map[string]any)) JSOption {
+	return func(j *JSEngine) {
+		j.panicHandler = handler
+	}
+}
