@@ -58,7 +58,7 @@ func (e *BaseEngine) ParseJob(path string, content []byte) (Task, error) {
 	}
 
 	jobID := filepath.Base(path)
-	job := NewBaseTask(jobID, path, e.EngineType, config.ToMap(), scriptContent, e.Self)
+	job := NewBaseTask(jobID, path, e.EngineType, config, scriptContent, e.Self)
 	return job, nil
 }
 
