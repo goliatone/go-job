@@ -49,7 +49,7 @@ func TestYAMLMetadataParser_Parse_NoMetadata(t *testing.T) {
 	config, script, err := parser.Parse(content)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "* * * * *", config.Schedule)
+	assert.Equal(t, job.DefaultSchedule, config.Schedule)
 	assert.Equal(t, 60, int(config.Timeout.Seconds()))
 	assert.Equal(t, "echo 'No metadata'", script)
 }
@@ -76,8 +76,28 @@ func TestYAMLMetadataParser_Parse_NumberWithUnderscores(t *testing.T) {
 	content := []byte(`
 # config
 # schedule: "*/15 * * * *"
+# retries: 30
 # timeout: 30_000
+# debug: true
+# run_once: true
+# script_type: shell
+# transaction: true
+# env:
+#  APP_NAME: test
+#  APP_PORT: 1234
+# metadata:
+#  test1: test
+#  test2: 2
 echo "Timeout with underscores"`)
+
+	env := map[string]string{
+		"APP_NAME": "test",
+		"APP_PORT": "1234",
+	}
+	meta := map[string]any{
+		"test1": "test",
+		"test2": 2,
+	}
 
 	config, script, err := parser.Parse(content)
 
@@ -85,6 +105,13 @@ echo "Timeout with underscores"`)
 	assert.Equal(t, "*/15 * * * *", config.Schedule)
 	// "30_000" becomes 30000 seconds after cleaning.
 	assert.Equal(t, 30000, int(config.Timeout.Seconds()))
+	assert.Equal(t, 30, config.Retries)
+	assert.Equal(t, true, config.Debug)
+	assert.Equal(t, true, config.RunOnce)
+	assert.Equal(t, true, config.Transaction)
+	assert.Equal(t, "shell", config.ScriptType)
+	assert.Equal(t, env, config.Env)
+	assert.Equal(t, meta, config.Metadata)
 	assert.Equal(t, "echo \"Timeout with underscores\"", script)
 }
 
