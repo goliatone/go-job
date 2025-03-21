@@ -62,9 +62,13 @@ func (e *BaseEngine) ParseJob(path string, content []byte) (Task, error) {
 	return job, nil
 }
 
-func (e *BaseEngine) GetScriptContent(msg ExecutionMessage) (string, error) {
+func (e *BaseEngine) GetScriptContent(msg *ExecutionMessage) (string, error) {
 	if content, ok := msg.Parameters["script"].(string); ok {
 		return content, nil
+	}
+
+	if e.SourceProvider == nil {
+		e.SourceProvider = NewFileSystemSourceProvider(".", e.FS)
 	}
 
 	content, err := e.SourceProvider.GetScript(msg.ScriptPath)
