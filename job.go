@@ -53,7 +53,7 @@ func (msg ExecutionMessage) Validate() error {
 // Task represents a schedulable job discovered from the filesystem
 type Task interface {
 	GetID() string
-	GetHandler() command.CommandFunc[*ExecutionMessage]
+	GetHandler() func() error
 	GetHandlerConfig() command.HandlerConfig
 	GetConfig() Config
 }
@@ -82,15 +82,15 @@ type MetadataParser interface {
 }
 
 type Config struct {
-	Schedule    string            `yaml:"schedule"`
-	Retries     int               `yaml:"retries"`
-	Timeout     time.Duration     `yaml:"duration"`
-	Debug       bool              `yaml:"debug"`
-	RunOnce     bool              `yaml:"run_once"`
-	Env         map[string]string `yaml:"env"`
-	ScriptType  string            `yaml:"script_type"`
-	Transaction bool              `yaml:"transaction"`
-	Metadata    map[string]any    `yaml:"metadata"`
+	Schedule    string            `yaml:"schedule" json:"schedule"`
+	Retries     int               `yaml:"retries" json:"retries"`
+	Timeout     time.Duration     `yaml:"duration" json:"duration"`
+	Debug       bool              `yaml:"debug" json:"debug"`
+	RunOnce     bool              `yaml:"run_once" json:"run_once"`
+	Env         map[string]string `yaml:"env" json:"env"`
+	ScriptType  string            `yaml:"script_type" json:"script_type"`
+	Transaction bool              `yaml:"transaction" json:"transaction"`
+	Metadata    map[string]any    `yaml:"metadata" json:"metadata"`
 }
 
 func (c Config) ToMap() map[string]any {
