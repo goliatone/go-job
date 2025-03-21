@@ -24,9 +24,9 @@ func (j *baseTask) GetID() string {
 	return j.id
 }
 
-func (j *baseTask) GetHandler() command.CommandFunc[*ExecutionMessage] {
-	return func(ctx context.Context, msg *ExecutionMessage) error {
-
+func (j *baseTask) GetHandler() func() error {
+	return func() error {
+		ctx := context.Background()
 		emsg := &ExecutionMessage{
 			JobID:      j.id,
 			ScriptPath: j.scriptPath,
