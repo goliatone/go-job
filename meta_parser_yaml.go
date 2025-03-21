@@ -17,6 +17,7 @@ type MatchPattern struct {
 	StartPattern  string
 	EndPattern    string
 	CommentPrefix string
+	IsBlock       bool // true for block comment styles (e.g. /** ... */)
 }
 
 type yamlMetadataParser struct {
@@ -31,22 +32,32 @@ var DefaultMatchPatterns = []MatchPattern{
 		CommentPrefix: "",
 	},
 	{
-		Name:          "javascript",
-		StartPattern:  `^/{2,}\s*config`, // // allow additional slashes before "config"
-		EndPattern:    `^(?!/{2,})`,      // end when the line does not start with at least two slashes
+		Name:          "javascript", // single line comments like // config
+		StartPattern:  `^/{2,}\s*config`,
+		EndPattern:    `^(?!/{2,})`,
 		CommentPrefix: "//",
+		IsBlock:       false,
+	},
+	{
+		Name:          "javascript_block", // block style comments /** config ... */
+		StartPattern:  `^/\*\*\s*config(.*)$`,
+		EndPattern:    `^\*/`,
+		CommentPrefix: "*",
+		IsBlock:       true,
 	},
 	{
 		Name:          "shell",
 		StartPattern:  `^#{1,}\s*config`,
 		EndPattern:    `^(?!#{1,})`,
 		CommentPrefix: "#",
+		IsBlock:       false,
 	},
 	{
 		Name:          "sql",
 		StartPattern:  `^-{2,}\s*config`,
 		EndPattern:    `^(?!-{2,})`,
 		CommentPrefix: "--",
+		IsBlock:       false,
 	},
 }
 
@@ -69,47 +80,71 @@ func NewYAMLMetadataParser(patterns ...MatchPattern) *yamlMetadataParser {
 func (p *yamlMetadataParser) Parse(content []byte) (Config, string, error) {
 	lines := bytes.Split(content, []byte("\n"))
 
-	for _, pattern := range p.patterns {
-		startRegex := regexp.MustCompile(pattern.StartPattern)
+	for i, line := range lines {
+		for _, pattern := range p.patterns {
+			re := regexp.MustCompile(pattern.StartPattern)
+			if re.Match(line) {
+				// Block comment style (e.g. /** ... */)
+				if pattern.IsBlock {
+					var metadataLines [][]byte
+					// Capture any content after "config" in the first line.
+					submatches := re.FindSubmatch(line)
+					if len(submatches) > 1 && len(submatches[1]) > 0 {
+						metadataLines = append(metadataLines, bytes.TrimSpace(submatches[1]))
+					}
+					// Read subsequent lines until the end block marker (e.g. "*/") is found.
+					endRegex := regexp.MustCompile(pattern.EndPattern)
+					j := i + 1
+					for ; j < len(lines); j++ {
+						if endRegex.Match(lines[j]) {
+							break
+						}
+						// Remove the block comment prefix (usually "*" plus an optional space).
+						metadataLines = append(metadataLines, stripCommentPrefix(lines[j], pattern.CommentPrefix))
+					}
+					scriptContent := ""
+					if j+1 < len(lines) {
+						scriptContent = string(bytes.Join(lines[j+1:], []byte("\n")))
+					}
+					metadataContent := bytes.Join(metadataLines, []byte("\n"))
+					cfg, err := parseRawConfig(metadataContent)
+					return cfg, scriptContent, err
+				}
 
-		for i, line := range lines {
-			if startRegex.Match(line) {
-				start := i + 1
-				var metadataLines [][]byte
-				var scriptContent string
-
-				// YAML branch: look for the end marker using EndPattern.
+				// YAML-style (no comment prefix) branch.
 				if pattern.CommentPrefix == "" {
 					endRegex := regexp.MustCompile(pattern.EndPattern)
 					end := len(lines)
-					for j := start; j < len(lines); j++ {
+					for j := i + 1; j < len(lines); j++ {
 						if endRegex.Match(lines[j]) {
 							end = j
 							break
 						}
 					}
-
-					metadataLines = lines[start:end]
+					metadataLines := lines[i+1 : end]
+					scriptContent := ""
 					if end+1 < len(lines) {
 						scriptContent = string(bytes.Join(lines[end+1:], []byte("\n")))
 					}
-				} else {
-					commentRegex := commentRegexFor(pattern.CommentPrefix)
-					end := len(lines)
-					for j := start; j < len(lines); j++ {
-						if !commentRegex.Match(lines[j]) {
-							end = j
-							break
-						}
-					}
-					metadataLines = lines[start:end]
-					scriptContent = string(bytes.Join(lines[end:], []byte("\n")))
-					// Strip the comment prefix from each metadata line.
-					for i, line := range metadataLines {
-						metadataLines[i] = stripCommentPrefix(line, pattern.CommentPrefix)
-					}
+					metadataContent := bytes.Join(metadataLines, []byte("\n"))
+					cfg, err := parseRawConfig(metadataContent)
+					return cfg, scriptContent, err
 				}
 
+				// Single-line comment branch.
+				commentRegex := commentRegexFor(pattern.CommentPrefix)
+				end := len(lines)
+				for j := i + 1; j < len(lines); j++ {
+					if !commentRegex.Match(lines[j]) {
+						end = j
+						break
+					}
+				}
+				metadataLines := lines[i+1 : end]
+				scriptContent := string(bytes.Join(lines[end:], []byte("\n")))
+				for i, line := range metadataLines {
+					metadataLines[i] = stripCommentPrefix(line, pattern.CommentPrefix)
+				}
 				metadataContent := bytes.Join(metadataLines, []byte("\n"))
 				cfg, err := parseRawConfig(metadataContent)
 				return cfg, scriptContent, err
@@ -183,10 +218,9 @@ func parseRawConfig(data []byte) (Config, error) {
 	return cfg, errs
 }
 
-// commentRegexFor returns a regex that will match a comment prefix repeated at least as many times as in the configured prefix.
-// For instance, if prefix is "--", then the regex will match two or more '-' at the start.
+// commentRegexFor returns a regex that will match a comment prefix
+// repeated at least as many times as in the configured prefix
 func commentRegexFor(prefix string) *regexp.Regexp {
-	// Check if all characters are identical.
 	allSame := true
 	for _, c := range prefix {
 		if c != rune(prefix[0]) {
@@ -194,16 +228,18 @@ func commentRegexFor(prefix string) *regexp.Regexp {
 			break
 		}
 	}
+
 	if allSame {
 		minCount := len(prefix)
-		// e.g. for prefix "//" -> regex becomes ^/{2,}
+		// if prefix is "//" then regex becomes ^/{2,}
 		return regexp.MustCompile("^" + regexp.QuoteMeta(strings.Repeat(string(prefix[0]), minCount)) + "+")
 	}
-	// Fallback: require exactly the configured prefix.
+	// require exactly the configured prefix
 	return regexp.MustCompile("^" + regexp.QuoteMeta(prefix))
 }
 
-// stripCommentPrefix removes the repeated comment marker (and one optional space) from the beginning of the line.
+// stripCommentPrefix removes the repeated comment marker
+// plus one optional space from the beginning of the line
 func stripCommentPrefix(line []byte, prefix string) []byte {
 	allSame := true
 	for _, c := range prefix {
@@ -215,7 +251,6 @@ func stripCommentPrefix(line []byte, prefix string) []byte {
 	var re *regexp.Regexp
 	if allSame {
 		minCount := len(prefix)
-		// Matches the repeated marker and an optional space.
 		re = regexp.MustCompile("^" + regexp.QuoteMeta(strings.Repeat(string(prefix[0]), minCount)) + "+\\s?")
 	} else {
 		re = regexp.MustCompile("^" + regexp.QuoteMeta(prefix) + "\\s?")
