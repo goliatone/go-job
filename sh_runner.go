@@ -35,7 +35,7 @@ func NewShellRunner(opts ...ShellOption) *ShellEngine {
 }
 
 func (e *ShellEngine) Execute(ctx context.Context, msg *ExecutionMessage) error {
-	scriptContent, err := e.GetScriptContent(*msg)
+	scriptContent, err := e.GetScriptContent(msg)
 	if err != nil {
 		return err
 	}
