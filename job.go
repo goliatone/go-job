@@ -2,7 +2,6 @@ package job
 
 import (
 	"context"
-	"maps"
 	"time"
 
 	"github.com/goliatone/go-command"
@@ -81,36 +80,26 @@ type MetadataParser interface {
 	Parse(content []byte) (Config, string, error)
 }
 
+// handler options
+// Deadline   time.Time     `json:"deadline"`
+// MaxRetries int           `json:"max_retries"`
+// MaxRuns    int           `json:"max_runs"`
+// RunOnce    bool          `json:"run_once"`
 type Config struct {
 	Schedule    string            `yaml:"schedule" json:"schedule"`
 	Retries     int               `yaml:"retries" json:"retries"`
 	Timeout     time.Duration     `yaml:"duration" json:"duration"`
+	NoTimeout   bool              `yaml:"no_timeout" json:"no_timeout"`
 	Debug       bool              `yaml:"debug" json:"debug"`
 	RunOnce     bool              `yaml:"run_once" json:"run_once"`
-	Env         map[string]string `yaml:"env" json:"env"`
 	ScriptType  string            `yaml:"script_type" json:"script_type"`
 	Transaction bool              `yaml:"transaction" json:"transaction"`
 	Metadata    map[string]any    `yaml:"metadata" json:"metadata"`
+	Env         map[string]string `yaml:"env" json:"env"`
 }
 
-func (c Config) ToMap() map[string]any {
-	result := make(map[string]any)
-
-	result["schedule"] = c.Schedule
-	result["retries"] = c.Retries
-	result["timeout"] = c.Timeout
-	result["debug"] = c.Debug
-	result["run_once"] = c.RunOnce
-	result["script_type"] = c.ScriptType
-	result["transaction"] = c.Transaction
-
-	if c.Env != nil {
-		result["env"] = c.Env
-	}
-
-	if c.Metadata != nil {
-		maps.Copy(result, c.Metadata)
-	}
-
-	return result
-}
+var (
+	// DefaultTimeout is used to setup the default timeout for tasks
+	DefaultTimeout  = time.Minute
+	DefaultSchedule = "* * * * *"
+)
