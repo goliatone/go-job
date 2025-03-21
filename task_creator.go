@@ -45,6 +45,7 @@ func (r *taskCreator) CreateTasks(ctx context.Context) ([]Task, error) {
 		}
 
 		if compatibleEngine == nil {
+			fmt.Printf("[WARN] task '%s' had no compatible engine", script.Path)
 			continue
 		}
 
