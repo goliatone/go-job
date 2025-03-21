@@ -3,7 +3,6 @@ package job
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/goliatone/go-command"
 )
@@ -55,8 +54,8 @@ func NewBaseTask(
 	engine Engine,
 ) Task {
 	handlerOpts := &command.HandlerConfig{
-		Expression: "* * * * *",
-		Timeout:    time.Minute,
+		Expression: DefaultSchedule,
+		Timeout:    DefaultTimeout,
 	}
 
 	// Map known meta fields to JobConfig
@@ -75,6 +74,14 @@ func NewBaseTask(
 	if config.RunOnce {
 		handlerOpts.RunOnce = true
 	}
+
+	if config.NoTimeout {
+		handlerOpts.NoTimeout = true
+	}
+
+	// handlerOpts.Deadline
+	// handlerOpts.MaxRetries
+	// handlerOpts.MaxRuns
 
 	return &baseTask{
 		id:            id,
