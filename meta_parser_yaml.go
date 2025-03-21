@@ -78,73 +78,89 @@ func NewYAMLMetadataParser(patterns ...MatchPattern) *yamlMetadataParser {
 // It returns a Config, the remaining script minus the config content
 // and any errors collected during parsing.
 func (p *yamlMetadataParser) Parse(content []byte) (Config, string, error) {
+	// Split the file into lines.
 	lines := bytes.Split(content, []byte("\n"))
 
-	for i, line := range lines {
+	for i, origLine := range lines {
+		line := bytes.TrimSpace(origLine)
 		for _, pattern := range p.patterns {
 			re := regexp.MustCompile(pattern.StartPattern)
 			if re.Match(line) {
-				// Block comment style (e.g. /** ... */)
 				if pattern.IsBlock {
 					var metadataLines [][]byte
-					// Capture any content after "config" in the first line.
+					// capture any text after "config" on the first line
 					submatches := re.FindSubmatch(line)
 					if len(submatches) > 1 && len(submatches[1]) > 0 {
 						metadataLines = append(metadataLines, bytes.TrimSpace(submatches[1]))
 					}
-					// Read subsequent lines until the end block marker (e.g. "*/") is found.
+
 					endRegex := regexp.MustCompile(pattern.EndPattern)
 					j := i + 1
 					for ; j < len(lines); j++ {
-						if endRegex.Match(lines[j]) {
+						trimmed := bytes.TrimSpace(lines[j])
+						if endRegex.Match(trimmed) {
 							break
 						}
-						// Remove the block comment prefix (usually "*" plus an optional space).
-						metadataLines = append(metadataLines, stripCommentPrefix(lines[j], pattern.CommentPrefix))
+						// remove the comment prefix from the trimmed line
+						metadataLines = append(metadataLines, stripCommentPrefix(trimmed, pattern.CommentPrefix))
 					}
+
 					scriptContent := ""
 					if j+1 < len(lines) {
+						// preserve the original script lines (with their spacing)
 						scriptContent = string(bytes.Join(lines[j+1:], []byte("\n")))
 					}
+
 					metadataContent := bytes.Join(metadataLines, []byte("\n"))
 					cfg, err := parseRawConfig(metadataContent)
 					return cfg, scriptContent, err
 				}
 
-				// YAML-style (no comment prefix) branch.
+				// YAML style with no comment prefix
 				if pattern.CommentPrefix == "" {
 					endRegex := regexp.MustCompile(pattern.EndPattern)
 					end := len(lines)
 					for j := i + 1; j < len(lines); j++ {
-						if endRegex.Match(lines[j]) {
+						trimmed := bytes.TrimSpace(lines[j])
+						if endRegex.Match(trimmed) {
 							end = j
 							break
 						}
 					}
-					metadataLines := lines[i+1 : end]
+
+					// trimmed metadata lines
+					var metadataLines [][]byte
+					for j := i + 1; j < end; j++ {
+						metadataLines = append(metadataLines, bytes.TrimSpace(lines[j]))
+					}
+
 					scriptContent := ""
 					if end+1 < len(lines) {
 						scriptContent = string(bytes.Join(lines[end+1:], []byte("\n")))
 					}
+
 					metadataContent := bytes.Join(metadataLines, []byte("\n"))
 					cfg, err := parseRawConfig(metadataContent)
 					return cfg, scriptContent, err
 				}
 
-				// Single-line comment branch.
+				// single line comment branch
 				commentRegex := commentRegexFor(pattern.CommentPrefix)
 				end := len(lines)
 				for j := i + 1; j < len(lines); j++ {
-					if !commentRegex.Match(lines[j]) {
+					trimmed := bytes.TrimSpace(lines[j])
+					if !commentRegex.Match(trimmed) {
 						end = j
 						break
 					}
 				}
-				metadataLines := lines[i+1 : end]
-				scriptContent := string(bytes.Join(lines[end:], []byte("\n")))
-				for i, line := range metadataLines {
-					metadataLines[i] = stripCommentPrefix(line, pattern.CommentPrefix)
+
+				var metadataLines [][]byte
+				for j := i + 1; j < end; j++ {
+					// use the trimmed version of the line
+					metadataLines = append(metadataLines, stripCommentPrefix(bytes.TrimSpace(lines[j]), pattern.CommentPrefix))
 				}
+				scriptContent := string(bytes.Join(lines[end:], []byte("\n")))
 				metadataContent := bytes.Join(metadataLines, []byte("\n"))
 				cfg, err := parseRawConfig(metadataContent)
 				return cfg, scriptContent, err
@@ -152,7 +168,6 @@ func (p *yamlMetadataParser) Parse(content []byte) (Config, string, error) {
 		}
 	}
 
-	// no metadata matched! return default config and full content
 	return Config{
 		Schedule: DefaultSchedule,
 		Timeout:  DefaultTimeout,
@@ -231,15 +246,14 @@ func commentRegexFor(prefix string) *regexp.Regexp {
 
 	if allSame {
 		minCount := len(prefix)
-		// if prefix is "//" then regex becomes ^/{2,}
+		// prefix "//" -> regex becomes ^/{2,}
 		return regexp.MustCompile("^" + regexp.QuoteMeta(strings.Repeat(string(prefix[0]), minCount)) + "+")
 	}
 	// require exactly the configured prefix
 	return regexp.MustCompile("^" + regexp.QuoteMeta(prefix))
 }
 
-// stripCommentPrefix removes the repeated comment marker
-// plus one optional space from the beginning of the line
+// stripCommentPrefix removes the repeated comment marker (and an optional space) from the beginning of the trimmed line.
 func stripCommentPrefix(line []byte, prefix string) []byte {
 	allSame := true
 	for _, c := range prefix {
@@ -251,9 +265,9 @@ func stripCommentPrefix(line []byte, prefix string) []byte {
 	var re *regexp.Regexp
 	if allSame {
 		minCount := len(prefix)
-		re = regexp.MustCompile("^" + regexp.QuoteMeta(strings.Repeat(string(prefix[0]), minCount)) + "+\\s?")
+		re = regexp.MustCompile("^" + regexp.QuoteMeta(strings.Repeat(string(prefix[0]), minCount)) + `+\s?`)
 	} else {
-		re = regexp.MustCompile("^" + regexp.QuoteMeta(prefix) + "\\s?")
+		re = regexp.MustCompile("^" + regexp.QuoteMeta(prefix) + `\s?`)
 	}
 	return re.ReplaceAll(line, []byte(""))
 }
