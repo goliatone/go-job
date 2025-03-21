@@ -118,16 +118,22 @@ func (p *yamlMetadataParser) Parse(content []byte) (Config, string, error) {
 
 	// no metadata matched! return default config and full content
 	return Config{
-		Schedule: "* * * * *",
-		Timeout:  time.Minute,
+		Schedule: DefaultSchedule,
+		Timeout:  DefaultTimeout,
 	}, string(content), nil
 }
 
 type rawConfig struct {
-	Schedule string `yaml:"schedule"`
-	Timeout  string `yaml:"timeout"`
-	Retries  int    `yaml:"retries"`
-	Debug    bool   `yaml:"debug"`
+	Schedule    string            `yaml:"schedule"`
+	Retries     int               `yaml:"retries"`
+	Timeout     string            `yaml:"timeout"`
+	NoTimeout   bool              `yaml:"no_timeout"`
+	Debug       bool              `yaml:"debug"`
+	RunOnce     bool              `yaml:"run_once"`
+	Env         map[string]string `yaml:"env"`
+	ScriptType  string            `yaml:"script_type"`
+	Transaction bool              `yaml:"transaction"`
+	Metadata    map[string]any    `yaml:"metadata"`
 }
 
 func parseRawConfig(data []byte) (Config, error) {
@@ -137,10 +143,16 @@ func parseRawConfig(data []byte) (Config, error) {
 	}
 
 	cfg := Config{
-		Schedule: raw.Schedule,
-		Retries:  raw.Retries,
-		Debug:    raw.Debug,
-		Timeout:  time.Minute, // default
+		Schedule:    raw.Schedule,
+		Retries:     raw.Retries,
+		NoTimeout:   raw.NoTimeout,
+		Debug:       raw.Debug,
+		RunOnce:     raw.RunOnce,
+		ScriptType:  raw.ScriptType,
+		Transaction: raw.Transaction,
+		Metadata:    raw.Metadata,
+		Env:         raw.Env,
+		Timeout:     DefaultTimeout,
 	}
 
 	var errs error
@@ -164,7 +176,7 @@ func parseRawConfig(data []byte) (Config, error) {
 	}
 
 	if cfg.Schedule == "" {
-		cfg.Schedule = "* * * * *"
+		cfg.Schedule = DefaultSchedule
 	}
 
 	return cfg, errs
