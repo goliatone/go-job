@@ -49,7 +49,7 @@ func (e *JSEngine) Execute(ctx context.Context, msg *ExecutionMessage) error {
 		"scriptPath": msg.ScriptPath,
 	})
 
-	scriptContent, err := e.GetScriptContent(*msg)
+	scriptContent, err := e.GetScriptContent(msg)
 	if err != nil {
 		return command.WrapError("JSEngineError", "failed to get script content", err)
 	}
