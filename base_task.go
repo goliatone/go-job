@@ -50,7 +50,7 @@ func (j *baseTask) GetConfig() Config {
 
 func NewBaseTask(
 	id, path, scriptType string,
-	meta map[string]any,
+	config Config,
 	scriptContent string,
 	engine Engine,
 ) Task {
@@ -59,53 +59,21 @@ func NewBaseTask(
 		Timeout:    time.Minute,
 	}
 
-	config := Config{
-		Schedule:   "* * * * *",
-		ScriptType: scriptType,
-	}
-
 	// Map known meta fields to JobConfig
-	if schedule, ok := meta["schedule"].(string); ok && schedule != "" {
-		config.Schedule = schedule
-		handlerOpts.Expression = schedule
+	if config.Schedule != "" {
+		handlerOpts.Expression = config.Schedule
 	}
 
-	if retries, ok := meta["retries"].(int); ok {
-		config.Retries = retries
-		handlerOpts.MaxRetries = retries
+	if config.Retries != 0 {
+		handlerOpts.MaxRetries = config.Retries
 	}
 
-	if timeout, ok := meta["timeout"].(time.Duration); ok {
-		config.Timeout = timeout
-		handlerOpts.Timeout = timeout
+	if !config.NoTimeout {
+		handlerOpts.Timeout = config.Timeout
 	}
 
-	if runOnce, ok := meta["run_once"].(bool); ok {
-		config.RunOnce = runOnce
-		handlerOpts.RunOnce = runOnce
-	}
-
-	if debug, ok := meta["debug"].(bool); ok {
-		config.Debug = debug
-	}
-
-	if env, ok := meta["env"].(map[string]string); ok {
-		config.Env = env
-	}
-
-	if transaction, ok := meta["transaction"].(bool); ok {
-		config.Transaction = transaction
-	}
-
-	// Add remaining metadata to Config.Metadata
-	config.Metadata = make(map[string]any)
-	for k, v := range meta {
-		switch k {
-		case "schedule", "retries", "timeout", "run_once", "debug", "env", "transaction", "script_type":
-			// These are already handled above
-		default:
-			config.Metadata[k] = v
-		}
+	if config.RunOnce {
+		handlerOpts.RunOnce = true
 	}
 
 	return &baseTask{
