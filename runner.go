@@ -17,10 +17,8 @@ type Runner struct {
 
 func NewRunner(opts ...Option) *Runner {
 	runner := &Runner{
-		registry: &memoryRegistry{
-			jobs: make(map[string]Task),
-		},
-		parser: &yamlMetadataParser{},
+		registry: NewMemoryRegistry(),
+		parser:   NewYAMLMetadataParser(),
 		errorHandler: func(err error) {
 			fmt.Printf("job error: %v\n", err)
 		},
