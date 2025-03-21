@@ -48,6 +48,7 @@ func (e *ShellEngine) Execute(ctx context.Context, msg *ExecutionMessage) error 
 		cmd.Dir = e.workDir
 	}
 
+	// NOTE: Use this if you know what you are doing :)
 	if use, ok := msg.Config.Metadata["use_env"].(bool); ok && use {
 		cmd.Env = os.Environ()
 	}
