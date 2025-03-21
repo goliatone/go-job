@@ -12,8 +12,28 @@ func TestYAMLMetadataParser_Parse_Shell(t *testing.T) {
 	content := []byte(`
 # config
 # schedule: "*/5 * * * *"
+# retries: 30
 # timeout: 120
+# debug: true
+# run_once: true
+# script_type: shell
+# transaction: true
+# env:
+#  APP_NAME: test
+#  APP_PORT: 1234
+# metadata:
+#  test1: test
+#  test2: 2
 echo "Hello, world!"`)
+
+	env := map[string]string{
+		"APP_NAME": "test",
+		"APP_PORT": "1234",
+	}
+	meta := map[string]any{
+		"test1": "test",
+		"test2": 2,
+	}
 
 	config, script, err := parser.Parse(content)
 
@@ -21,6 +41,13 @@ echo "Hello, world!"`)
 	assert.Equal(t, "*/5 * * * *", config.Schedule)
 	// 120 interpreted as 120 seconds
 	assert.Equal(t, 120, int(config.Timeout.Seconds()))
+	assert.Equal(t, 30, config.Retries)
+	assert.Equal(t, true, config.Debug)
+	assert.Equal(t, true, config.RunOnce)
+	assert.Equal(t, true, config.Transaction)
+	assert.Equal(t, "shell", config.ScriptType)
+	assert.Equal(t, env, config.Env)
+	assert.Equal(t, meta, config.Metadata)
 	assert.Equal(t, "echo \"Hello, world!\"", script)
 }
 
@@ -30,15 +57,85 @@ func TestYAMLMetadataParser_Parse_JS(t *testing.T) {
 // config
 // schedule: "0 12 * * *"
 // timeout: 300s
+// retries: 30
+// debug: true
+// run_once: true
+// script_type: shell
+// transaction: true
+// env:
+//  APP_NAME: test
+//  APP_PORT: 1234
+// metadata:
+//  test1: test
+//  test2: 2
 
 console.log("Running script...");`)
 
+	env := map[string]string{
+		"APP_NAME": "test",
+		"APP_PORT": "1234",
+	}
+	meta := map[string]any{
+		"test1": "test",
+		"test2": 2,
+	}
 	config, script, err := parser.Parse(content)
 
 	assert.NoError(t, err)
 	assert.Equal(t, "0 12 * * *", config.Schedule)
 	// "300s" parsed correctly
 	assert.Equal(t, 300, int(config.Timeout.Seconds()))
+	assert.Equal(t, 30, config.Retries)
+	assert.Equal(t, true, config.Debug)
+	assert.Equal(t, true, config.RunOnce)
+	assert.Equal(t, true, config.Transaction)
+	assert.Equal(t, "shell", config.ScriptType)
+	assert.Equal(t, env, config.Env)
+	assert.Equal(t, meta, config.Metadata)
+	assert.Equal(t, "\nconsole.log(\"Running script...\");", script)
+}
+
+func TestYAMLMetadataParser_Parse_JS_2(t *testing.T) {
+	parser := job.NewYAMLMetadataParser()
+	content := []byte(`
+// config
+//// schedule: "0 12 * * *"
+// timeout: 300s
+// retries: 30
+/// debug: true
+// run_once: true
+// script_type: shell
+// transaction: true
+/// env:
+///  APP_NAME: test
+///  APP_PORT: 1234
+/// metadata:
+///  test1: test
+///  test2: 2
+
+console.log("Running script...");`)
+
+	env := map[string]string{
+		"APP_NAME": "test",
+		"APP_PORT": "1234",
+	}
+	meta := map[string]any{
+		"test1": "test",
+		"test2": 2,
+	}
+	config, script, err := parser.Parse(content)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "0 12 * * *", config.Schedule)
+	// "300s" parsed correctly
+	assert.Equal(t, 300, int(config.Timeout.Seconds()))
+	assert.Equal(t, 30, config.Retries)
+	assert.Equal(t, true, config.Debug)
+	assert.Equal(t, true, config.RunOnce)
+	assert.Equal(t, true, config.Transaction)
+	assert.Equal(t, "shell", config.ScriptType)
+	assert.Equal(t, env, config.Env)
+	assert.Equal(t, meta, config.Metadata)
 	assert.Equal(t, "\nconsole.log(\"Running script...\");", script)
 }
 
@@ -76,8 +173,8 @@ func TestYAMLMetadataParser_Parse_NumberWithUnderscores(t *testing.T) {
 	content := []byte(`
 # config
 # schedule: "*/15 * * * *"
-# retries: 30
 # timeout: 30_000
+# retries: 30
 # debug: true
 # run_once: true
 # script_type: shell
@@ -113,6 +210,110 @@ echo "Timeout with underscores"`)
 	assert.Equal(t, env, config.Env)
 	assert.Equal(t, meta, config.Metadata)
 	assert.Equal(t, "echo \"Timeout with underscores\"", script)
+}
+
+func TestYAMLMetadataParser_Parse_SQL(t *testing.T) {
+	parser := job.NewYAMLMetadataParser()
+	content := []byte(`
+-- config
+-- schedule: "*/15 * * * *"
+-- retries: 30
+-- timeout: 30_000
+-- debug: true
+-- run_once: true
+-- script_type: shell
+-- transaction: true
+-- env:
+--  APP_NAME: test
+--  APP_PORT: 1234
+-- metadata:
+--  test1: test
+--  test2: 2
+
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema = 'public'
+ORDER BY table_name;`)
+
+	env := map[string]string{
+		"APP_NAME": "test",
+		"APP_PORT": "1234",
+	}
+	meta := map[string]any{
+		"test1": "test",
+		"test2": 2,
+	}
+
+	config, script, err := parser.Parse(content)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "*/15 * * * *", config.Schedule)
+	// "30_000" becomes 30000 seconds after cleaning.
+	assert.Equal(t, 30000, int(config.Timeout.Seconds()))
+	assert.Equal(t, 30, config.Retries)
+	assert.Equal(t, true, config.Debug)
+	assert.Equal(t, true, config.RunOnce)
+	assert.Equal(t, true, config.Transaction)
+	assert.Equal(t, "shell", config.ScriptType)
+	assert.Equal(t, env, config.Env)
+	assert.Equal(t, meta, config.Metadata)
+	assert.Equal(t, `
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema = 'public'
+ORDER BY table_name;`, script)
+}
+
+func TestYAMLMetadataParser_Parse_SQL2(t *testing.T) {
+	parser := job.NewYAMLMetadataParser()
+	content := []byte(`
+---- config
+---- schedule: "*/15 * * * *"
+---- retries: 30
+---- timeout: 30_000
+---- debug: true
+---- run_once: true
+---- script_type: shell
+---- transaction: true
+---- env:
+----  APP_NAME: test
+----  APP_PORT: 1234
+---- metadata:
+----  test1: test
+----  test2: 2
+
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema = 'public'
+ORDER BY table_name;`)
+
+	env := map[string]string{
+		"APP_NAME": "test",
+		"APP_PORT": "1234",
+	}
+	meta := map[string]any{
+		"test1": "test",
+		"test2": 2,
+	}
+
+	config, script, err := parser.Parse(content)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "*/15 * * * *", config.Schedule)
+	// "30_000" becomes 30000 seconds after cleaning.
+	assert.Equal(t, 30000, int(config.Timeout.Seconds()))
+	assert.Equal(t, 30, config.Retries)
+	assert.Equal(t, true, config.Debug)
+	assert.Equal(t, true, config.RunOnce)
+	assert.Equal(t, true, config.Transaction)
+	assert.Equal(t, "shell", config.ScriptType)
+	assert.Equal(t, env, config.Env)
+	assert.Equal(t, meta, config.Metadata)
+	assert.Equal(t, `
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema = 'public'
+ORDER BY table_name;`, script)
 }
 
 func TestYAMLMetadataParser_Parse_WithCruft(t *testing.T) {
