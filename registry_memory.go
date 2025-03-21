@@ -10,6 +10,12 @@ type memoryRegistry struct {
 	jobs map[string]Task
 }
 
+func NewMemoryRegistry() *memoryRegistry {
+	return &memoryRegistry{
+		jobs: make(map[string]Task),
+	}
+}
+
 func (r *memoryRegistry) Add(job Task) error {
 	r.mx.Lock()
 	defer r.mx.Unlock()
