@@ -23,34 +23,39 @@ type yamlMetadataParser struct {
 	patterns []MatchPattern
 }
 
-func NewYAMLMetadataParser() *yamlMetadataParser {
+var DefaultMatchPatterns = []MatchPattern{
+	{
+		Name:          "yaml",
+		StartPattern:  `^---\s*$`,
+		EndPattern:    `^---\s*$`,
+		CommentPrefix: "",
+	},
+	{
+		Name:          "javascript",
+		StartPattern:  `^/{2,}\s*config`, // // allow additional slashes before "config"
+		EndPattern:    `^(?!/{2,})`,      // end when the line does not start with at least two slashes
+		CommentPrefix: "//",
+	},
+	{
+		Name:          "shell",
+		StartPattern:  `^#{1,}\s*config`,
+		EndPattern:    `^(?!#{1,})`,
+		CommentPrefix: "#",
+	},
+	{
+		Name:          "sql",
+		StartPattern:  `^-{2,}\s*config`,
+		EndPattern:    `^(?!-{2,})`,
+		CommentPrefix: "--",
+	},
+}
+
+func NewYAMLMetadataParser(patterns ...MatchPattern) *yamlMetadataParser {
+
+	patterns = append(patterns, DefaultMatchPatterns...)
+
 	return &yamlMetadataParser{
-		patterns: []MatchPattern{
-			{
-				Name:          "yaml",
-				StartPattern:  `^---\s*$`,
-				EndPattern:    `^---\s*$`,
-				CommentPrefix: "",
-			},
-			{
-				Name:          "javascript",
-				StartPattern:  `^//\s*config`,
-				EndPattern:    `^(?!//)`, // negative lookahead for comment prefix
-				CommentPrefix: "//",
-			},
-			{
-				Name:          "shell",
-				StartPattern:  `^#\s*config`,
-				EndPattern:    `^(?!#)`, // stop at first non-comment line
-				CommentPrefix: "#",
-			},
-			{
-				Name:          "sql",
-				StartPattern:  `^--\s*config`,
-				EndPattern:    `^(?!--)`, // stop at first non-comment line
-				CommentPrefix: "--",
-			},
-		},
+		patterns: patterns,
 	}
 }
 
@@ -83,29 +88,25 @@ func (p *yamlMetadataParser) Parse(content []byte) (Config, string, error) {
 							break
 						}
 					}
+
 					metadataLines = lines[start:end]
-					// Script content is all lines after the end marker.
 					if end+1 < len(lines) {
 						scriptContent = string(bytes.Join(lines[end+1:], []byte("\n")))
 					}
 				} else {
-					// Comment-based metadata.
+					commentRegex := commentRegexFor(pattern.CommentPrefix)
 					end := len(lines)
 					for j := start; j < len(lines); j++ {
-						if !bytes.HasPrefix(lines[j], []byte(pattern.CommentPrefix)) {
+						if !commentRegex.Match(lines[j]) {
 							end = j
 							break
 						}
 					}
 					metadataLines = lines[start:end]
 					scriptContent = string(bytes.Join(lines[end:], []byte("\n")))
-					// Remove comment prefix from metadata lines.
+					// Strip the comment prefix from each metadata line.
 					for i, line := range metadataLines {
-						line = bytes.TrimPrefix(line, []byte(pattern.CommentPrefix))
-						if len(line) > 0 && line[0] == ' ' {
-							line = line[1:]
-						}
-						metadataLines[i] = line
+						metadataLines[i] = stripCommentPrefix(line, pattern.CommentPrefix)
 					}
 				}
 
@@ -180,4 +181,44 @@ func parseRawConfig(data []byte) (Config, error) {
 	}
 
 	return cfg, errs
+}
+
+// commentRegexFor returns a regex that will match a comment prefix repeated at least as many times as in the configured prefix.
+// For instance, if prefix is "--", then the regex will match two or more '-' at the start.
+func commentRegexFor(prefix string) *regexp.Regexp {
+	// Check if all characters are identical.
+	allSame := true
+	for _, c := range prefix {
+		if c != rune(prefix[0]) {
+			allSame = false
+			break
+		}
+	}
+	if allSame {
+		minCount := len(prefix)
+		// e.g. for prefix "//" -> regex becomes ^/{2,}
+		return regexp.MustCompile("^" + regexp.QuoteMeta(strings.Repeat(string(prefix[0]), minCount)) + "+")
+	}
+	// Fallback: require exactly the configured prefix.
+	return regexp.MustCompile("^" + regexp.QuoteMeta(prefix))
+}
+
+// stripCommentPrefix removes the repeated comment marker (and one optional space) from the beginning of the line.
+func stripCommentPrefix(line []byte, prefix string) []byte {
+	allSame := true
+	for _, c := range prefix {
+		if c != rune(prefix[0]) {
+			allSame = false
+			break
+		}
+	}
+	var re *regexp.Regexp
+	if allSame {
+		minCount := len(prefix)
+		// Matches the repeated marker and an optional space.
+		re = regexp.MustCompile("^" + regexp.QuoteMeta(strings.Repeat(string(prefix[0]), minCount)) + "+\\s?")
+	} else {
+		re = regexp.MustCompile("^" + regexp.QuoteMeta(prefix) + "\\s?")
+	}
+	return re.ReplaceAll(line, []byte(""))
 }
