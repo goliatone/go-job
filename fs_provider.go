@@ -25,6 +25,9 @@ func NewFileSystemSourceProvider(rootDir string, fss ...fs.FS) *FileSystemSource
 }
 
 func (p *FileSystemSourceProvider) GetScript(path string) ([]byte, error) {
+
+	path = filepath.Clean(path)
+
 	file, err := p.fs.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file %s: %w", path, err)
