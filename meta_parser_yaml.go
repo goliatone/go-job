@@ -20,8 +20,13 @@ type MatchPattern struct {
 	IsBlock       bool // true for block comment styles (e.g. /** ... */)
 }
 
+type Processor interface {
+	Process([]byte) ([]byte, error)
+}
+
 type yamlMetadataParser struct {
-	patterns []MatchPattern
+	patterns   []MatchPattern
+	processors []Processor
 }
 
 var DefaultMatchPatterns = []MatchPattern{
@@ -67,7 +72,21 @@ func NewYAMLMetadataParser(patterns ...MatchPattern) *yamlMetadataParser {
 
 	return &yamlMetadataParser{
 		patterns: patterns,
+		processors: []Processor{
+			&ScheduleQuotesProcessor{},
+		},
 	}
+}
+
+func (p *yamlMetadataParser) applyProcesors(data []byte) ([]byte, error) {
+	var err error
+	for _, processor := range p.processors {
+		data, err = processor.Process(data)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return data, nil
 }
 
 // Parse extracts metadata and script content from the given content,
@@ -78,8 +97,13 @@ func NewYAMLMetadataParser(patterns ...MatchPattern) *yamlMetadataParser {
 // It returns a Config, the remaining script minus the config content
 // and any errors collected during parsing.
 func (p *yamlMetadataParser) Parse(content []byte) (Config, string, error) {
+	processedContent, err := p.applyProcesors(content)
+	if err != nil {
+		return Config{}, "", err
+	}
+
 	// Split the file into lines.
-	lines := bytes.Split(content, []byte("\n"))
+	lines := bytes.Split(processedContent, []byte("\n"))
 
 	for i, origLine := range lines {
 		line := bytes.TrimSpace(origLine)
@@ -171,6 +195,7 @@ func (p *yamlMetadataParser) Parse(content []byte) (Config, string, error) {
 	return Config{
 		Schedule: DefaultSchedule,
 		Timeout:  DefaultTimeout,
+		// TODO: should we return processed content or raw?
 	}, string(content), nil
 }
 
@@ -270,4 +295,15 @@ func stripCommentPrefix(line []byte, prefix string) []byte {
 		re = regexp.MustCompile("^" + regexp.QuoteMeta(prefix) + `\s?`)
 	}
 	return re.ReplaceAll(line, []byte(""))
+}
+
+// ScheduleQuotesProcessor ensures that schedule values
+// like @every are properly quoted so the parser does
+// not barf an error
+type ScheduleQuotesProcessor struct{}
+
+func (s *ScheduleQuotesProcessor) Process(data []byte) ([]byte, error) {
+	re := regexp.MustCompile(`(?m)^((?:-+\s*)?)(schedule:\s*)(@(?:(?:every(?:\s+\S+)?)|yearly|annually|monthly|weekly|daily|midnight|hourly|reboot)\b.*)$`)
+	result := re.ReplaceAll(data, []byte(`${1}${2}"${3}"`))
+	return result, nil
 }
