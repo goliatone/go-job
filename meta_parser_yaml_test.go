@@ -361,6 +361,58 @@ WHERE table_schema = 'public'
 ORDER BY table_name;`, script)
 }
 
+func TestYAMLMetadataParser_Parse_SQL3(t *testing.T) {
+	parser := job.NewYAMLMetadataParser()
+	content := []byte(`
+---- config
+---- schedule: @every 11s
+---- retries: 10
+---- timeout: 30s
+---- debug: true
+---- run_once: true
+---- script_type: shell
+---- transaction: true
+---- env:
+----  APP_NAME: test
+----  APP_PORT: 1234
+---- metadata:
+----  test1: test
+----  test2: 2
+
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema = 'public'
+ORDER BY table_name;`)
+
+	env := map[string]string{
+		"APP_NAME": "test",
+		"APP_PORT": "1234",
+	}
+	meta := map[string]any{
+		"test1": "test",
+		"test2": 2,
+	}
+
+	config, script, err := parser.Parse(content)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "@every 11s", config.Schedule)
+	// "30_000" becomes 30000 seconds after cleaning.
+	assert.Equal(t, 30, int(config.Timeout.Seconds()))
+	assert.Equal(t, 10, config.Retries)
+	assert.Equal(t, true, config.Debug)
+	assert.Equal(t, true, config.RunOnce)
+	assert.Equal(t, true, config.Transaction)
+	assert.Equal(t, "shell", config.ScriptType)
+	assert.Equal(t, env, config.Env)
+	assert.Equal(t, meta, config.Metadata)
+	assert.Equal(t, `
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema = 'public'
+ORDER BY table_name;`, script)
+}
+
 func TestYAMLMetadataParser_Parse_WithCruft(t *testing.T) {
 	parser := job.NewYAMLMetadataParser()
 	content := []byte(`
