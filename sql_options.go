@@ -1,6 +1,7 @@
 package job
 
 import (
+	"database/sql"
 	"io/fs"
 	"strings"
 	"time"
@@ -37,6 +38,15 @@ func WithSQLDatabase(driverName, dataSourceName string) SQLOption {
 	return func(e *SQLEngine) {
 		e.driverName = driverName
 		e.dataSourceName = dataSourceName
+	}
+}
+
+// WithSQLClient sets the db client
+func WithSQLClient(db *sql.DB) SQLOption {
+	return func(s *SQLEngine) {
+		if db != nil {
+			s.db = db
+		}
 	}
 }
 
