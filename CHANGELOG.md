@@ -1,5 +1,25 @@
 # Changelog
 
+# [0.2.0](https://github.com/goliatone/go-job/compare/v0.1.0...v0.2.0) - (2025-04-11)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.2.0 ([dc82174](https://github.com/goliatone/go-job/commit/dc82174bc104d0e363e87795780b7d13add1a79d))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Option to configure SQL client ([4fbee27](https://github.com/goliatone/go-job/commit/4fbee271923bc8ecb6ab06a256aa80e55ca59ae0))  - (goliatone)
+- Test meta ([2a01df8](https://github.com/goliatone/go-job/commit/2a01df83fb1c9827d2c344ecede340d98c3c0f65))  - (goliatone)
+- Content processors so we can pre-process before parsing ([57cc00e](https://github.com/goliatone/go-job/commit/57cc00e55b7b55862fdd0dfdd13591597b20328b))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.1.0 ([c6a3920](https://github.com/goliatone/go-job/commit/c6a39209c7b5d08fdd47eb95631141b9f3624fd0))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Add deps ([09309cf](https://github.com/goliatone/go-job/commit/09309cf059680ec1debf167d482bd74596d0d65c))  - (goliatone)
+
 # [0.1.0](https://github.com/goliatone/go-job/tree/v0.1.0) - (2025-03-21)
 
 ## <!-- 1 -->🐛 Bug Fixes
