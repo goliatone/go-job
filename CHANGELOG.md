@@ -1,5 +1,35 @@
 # Changelog
 
+# [0.3.0](https://github.com/goliatone/go-job/compare/v0.2.0...v0.3.0) - (2025-04-14)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.3.0 ([1b5c3eb](https://github.com/goliatone/go-job/commit/1b5c3eb9c5297f3d9c28dbe22506ca9875b389f4))  - (goliatone)
+
+## <!-- 2 -->🚜 Refactor
+
+- Use unified logger ([c9c55a8](https://github.com/goliatone/go-job/commit/c9c55a85eb02eea37ba7a995d0076bb40f225f5d))  - (goliatone)
+- Use unified logger ([cd741e4](https://github.com/goliatone/go-job/commit/cd741e4d80ae3f6eae96b6d3de146da1915911b5))  - (goliatone)
+- Use unified logger ([5010bab](https://github.com/goliatone/go-job/commit/5010bab8ea386a327bb8db520c84bf75ebdd3ea3))  - (goliatone)
+- Use unified logger ([13758df](https://github.com/goliatone/go-job/commit/13758dfb661ee457319c0a680c2bea47bf2dc250))  - (goliatone)
+- Use unified logger ([9986351](https://github.com/goliatone/go-job/commit/9986351fe2dea3e5498daa101000ece60077df43))  - (goliatone)
+- Use unified logger ([9e14312](https://github.com/goliatone/go-job/commit/9e143124d574bae26981bcc82e8c1d9ff4371057))  - (goliatone)
+- Use unified logger ([5279768](https://github.com/goliatone/go-job/commit/5279768ade3a5534e3e72280e77bf16078f2ef8e))  - (goliatone)
+- Use unified logger ([c174861](https://github.com/goliatone/go-job/commit/c1748614ad554f7795095e6c2303e0012a62d010))  - (goliatone)
+- Use unified logger ([847caa9](https://github.com/goliatone/go-job/commit/847caa9b7dbeda06a6970257e6e6eff93f382f3e))  - (goliatone)
+- Use unified logger ([5b11bfa](https://github.com/goliatone/go-job/commit/5b11bfa496f27e4f6942fe4fbe8086860d69f036))  - (goliatone)
+- Use unified logger ([30d6bb1](https://github.com/goliatone/go-job/commit/30d6bb1836dafe30843d6820a2e53fd86c3c1b1c))  - (goliatone)
+- Use unified logger ([3635512](https://github.com/goliatone/go-job/commit/36355128d9f04f3722ee77cdb9333691f9b71855))  - (goliatone)
+- Use unified logger ([07b9613](https://github.com/goliatone/go-job/commit/07b96133266495b4cefe233c708b2a3688c88e3e))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.2.0 ([ce3af63](https://github.com/goliatone/go-job/commit/ce3af63e03609a7182bba8855bfeae0437a51147))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update taskfile ([b5510a1](https://github.com/goliatone/go-job/commit/b5510a18a0111c3566682b6844d4fb546f1df7c5))  - (goliatone)
+
 # [0.2.0](https://github.com/goliatone/go-job/compare/v0.1.0...v0.2.0) - (2025-04-11)
 
 ## <!-- 13 -->📦 Bumps
