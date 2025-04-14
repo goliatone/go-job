@@ -5,6 +5,7 @@ import "fmt"
 type Logger interface {
 	Debug(format string, args ...any)
 	Info(format string, args ...any)
+	Warn(format string, args ...any)
 	Error(format string, args ...any)
 }
 
@@ -22,6 +23,12 @@ func (d *defaultLogger) Debug(format string, args ...any) {
 func (d *defaultLogger) Info(format string, args ...any) {
 	if LoggerEnabled {
 		fmt.Printf("[INFO] "+format+"\n", args...)
+	}
+}
+
+func (d *defaultLogger) Warn(format string, args ...any) {
+	if LoggerEnabled {
+		fmt.Printf("[WARN] "+format+"\n", args...)
 	}
 }
 
