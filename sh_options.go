@@ -76,3 +76,11 @@ func WithShellMetadataParser(parser MetadataParser) ShellOption {
 		}
 	}
 }
+
+func WithShellLogger(logger Logger) ShellOption {
+	return func(se *ShellEngine) {
+		if logger != nil {
+			se.logger = logger
+		}
+	}
+}
