@@ -131,7 +131,9 @@ func (e *SQLEngine) executeDirectly(ctx context.Context, db *sql.DB, script stri
 	statements := splitSQLStatements(script, e.scriptBoundary)
 
 	for i, stmt := range statements {
+		e.logger.Debug("execute statement", "sql", stmt)
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			e.logger.Error("error executing statement", err)
 			return command.WrapError(
 				"SQLExecutionError",
 				fmt.Sprintf("failed to execute statement %d", i+1),
