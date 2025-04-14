@@ -2,7 +2,7 @@ package job
 
 type Option func(*Runner)
 
-func WithErrorHandler(handler func(error)) Option {
+func WithErrorHandler(handler func(Task, error)) Option {
 	return func(fsjr *Runner) {
 		if handler != nil {
 			fsjr.errorHandler = handler
