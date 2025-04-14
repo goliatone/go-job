@@ -20,6 +20,7 @@ type BaseEngine struct {
 	SourceProvider SourceProvider
 	EngineType     string
 	Self           Engine
+	logger         Logger
 }
 
 func NewBaseEngine(self Engine, engingeType string, exts ...string) *BaseEngine {
@@ -30,6 +31,7 @@ func NewBaseEngine(self Engine, engingeType string, exts ...string) *BaseEngine 
 		EngineType:     engingeType,
 		FileExtensions: exts,
 		Self:           self,
+		logger:         &defaultLogger{},
 	}
 }
 
