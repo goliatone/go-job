@@ -67,3 +67,11 @@ func WithSQLFS(dirfs fs.FS) SQLOption {
 		}
 	}
 }
+
+func WithSQLLogger(logger Logger) SQLOption {
+	return func(se *SQLEngine) {
+		if logger != nil {
+			se.logger = logger
+		}
+	}
+}
