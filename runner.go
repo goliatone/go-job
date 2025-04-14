@@ -2,7 +2,6 @@ package job
 
 import (
 	"context"
-	"fmt"
 	"sync"
 )
 
@@ -11,37 +10,47 @@ type Runner struct {
 	registry Registry
 
 	parser       MetadataParser
-	errorHandler func(error)
+	errorHandler func(Task, error)
 	taskCreators []TaskCreator
+	logger       Logger
 }
 
 func NewRunner(opts ...Option) *Runner {
-	runner := &Runner{
+	rn := &Runner{
 		registry: NewMemoryRegistry(),
 		parser:   NewYAMLMetadataParser(),
-		errorHandler: func(err error) {
-			fmt.Printf("job error: %v\n", err)
-		},
+		logger:   &defaultLogger{},
 	}
 
 	for _, opt := range opts {
 		if opt != nil {
-			opt(runner)
+			opt(rn)
 		}
 	}
-	return runner
+
+	if rn.errorHandler == nil {
+		rn.errorHandler = func(task Task, err error) {
+			if task != nil {
+				rn.logger.Error("job error", err, "id", task.GetID())
+				return
+			}
+			rn.logger.Error("job error", err)
+		}
+	}
+
+	return rn
 }
 
 func (r *Runner) Start(ctx context.Context) error {
 	for _, make := range r.taskCreators {
 		tasks, err := make.CreateTasks(ctx)
 		if err != nil {
-			r.errorHandler(err)
+			r.errorHandler(nil, err)
 			continue
 		}
 		for _, task := range tasks {
 			if err := r.registry.Add(task); err != nil {
-				r.errorHandler(err)
+				r.errorHandler(task, err)
 			}
 		}
 	}
