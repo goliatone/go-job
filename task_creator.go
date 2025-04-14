@@ -9,6 +9,7 @@ type taskCreator struct {
 	engines        []Engine
 	errorHandler   func(error)
 	sourceProvider SourceProvider
+	logger         Logger
 }
 
 func NewTaskCreator(provider SourceProvider, engines []Engine) *taskCreator {
@@ -16,9 +17,14 @@ func NewTaskCreator(provider SourceProvider, engines []Engine) *taskCreator {
 		sourceProvider: provider,
 		engines:        engines,
 		errorHandler: func(err error) {
-			fmt.Printf("task creator error: %v\n", err)
+			fmt.Printf(">> task creator error: %v <<\n", err)
 		},
 	}
+}
+
+func (f *taskCreator) WithLogger(logger Logger) *taskCreator {
+	f.logger = logger
+	return f
 }
 
 // WithErrorHandler sets a custom error handler
