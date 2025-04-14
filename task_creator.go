@@ -7,19 +7,26 @@ import (
 
 type taskCreator struct {
 	engines        []Engine
-	errorHandler   func(error)
+	errorHandler   func(Task, error)
 	sourceProvider SourceProvider
 	logger         Logger
 }
 
 func NewTaskCreator(provider SourceProvider, engines []Engine) *taskCreator {
-	return &taskCreator{
+	tc := &taskCreator{
 		sourceProvider: provider,
 		engines:        engines,
-		errorHandler: func(err error) {
-			fmt.Printf(">> task creator error: %v <<\n", err)
-		},
 	}
+
+	tc.errorHandler = func(task Task, err error) {
+		if task != nil {
+			tc.logger.Error("task creator error", "id", task.GetID(), err)
+		} else {
+			tc.logger.Error("task creator error", err)
+		}
+	}
+
+	return tc
 }
 
 func (f *taskCreator) WithLogger(logger Logger) *taskCreator {
@@ -28,7 +35,7 @@ func (f *taskCreator) WithLogger(logger Logger) *taskCreator {
 }
 
 // WithErrorHandler sets a custom error handler
-func (f *taskCreator) WithErrorHandler(handler func(error)) *taskCreator {
+func (f *taskCreator) WithErrorHandler(handler func(Task, error)) *taskCreator {
 	f.errorHandler = handler
 	return f
 }
@@ -51,13 +58,13 @@ func (r *taskCreator) CreateTasks(ctx context.Context) ([]Task, error) {
 		}
 
 		if compatibleEngine == nil {
-			fmt.Printf("[WARN] task '%s' had no compatible engine", script.Path)
+			r.logger.Warn("task had no compatible engine", "path", script.Path)
 			continue
 		}
 
 		task, err := compatibleEngine.ParseJob(script.Path, script.Content)
 		if err != nil {
-			r.errorHandler(fmt.Errorf("failed to parse task %s: %w", script.Path, err))
+			r.errorHandler(task, fmt.Errorf("failed to parse task %s: %w", script.Path, err))
 			continue
 		}
 
