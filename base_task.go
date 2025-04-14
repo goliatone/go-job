@@ -2,7 +2,6 @@ package job
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/goliatone/go-command"
 )
@@ -15,6 +14,7 @@ type baseTask struct {
 	config        Config
 	scriptContent string
 	engine        Engine
+	logger        Logger
 }
 
 var _ Task = &baseTask{}
@@ -33,7 +33,7 @@ func (j *baseTask) GetHandler() func() error {
 			Parameters: make(map[string]any),
 		}
 		emsg.Parameters["script"] = j.scriptContent
-		fmt.Println("executing engine " + j.engine.Name())
+		j.logger.Debug("executing task", "engine", j.engine.Name())
 
 		return j.engine.Execute(ctx, emsg)
 	}
@@ -91,5 +91,6 @@ func NewBaseTask(
 		scriptContent: scriptContent,
 		engine:        engine,
 		config:        config,
+		logger:        &defaultLogger{},
 	}
 }
