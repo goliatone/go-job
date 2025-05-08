@@ -15,11 +15,13 @@ type SQLEngine struct {
 	driverName     string
 	dataSourceName string
 	scriptBoundary string
+	execCallback   func(e *SQLEngine, db *sql.DB, statement string, res sql.Result, err error) error
 }
 
 func NewSQLRunner(opts ...SQLOption) *SQLEngine {
 	e := &SQLEngine{
 		scriptBoundary: "--job",
+		execCallback:   defaultExecuteCallback,
 	}
 	e.BaseEngine = NewBaseEngine(e, "sql", ".sql")
 
@@ -113,7 +115,7 @@ func (e *SQLEngine) executeInTransaction(ctx context.Context, db *sql.DB, script
 			tx.Rollback()
 			return command.WrapError(
 				"SQLExecutionError",
-				fmt.Sprintf("failed to execute statement %d", i+1),
+				fmt.Sprintf("failed to execute statement transaction %d", i+1),
 				err,
 			)
 		}
@@ -131,16 +133,29 @@ func (e *SQLEngine) executeDirectly(ctx context.Context, db *sql.DB, script stri
 	statements := splitSQLStatements(script, e.scriptBoundary)
 
 	for i, stmt := range statements {
-		e.logger.Debug("execute statement", "sql", stmt)
-		if _, err := db.ExecContext(ctx, stmt); err != nil {
-			e.logger.Error("error executing statement", err)
-			return command.WrapError(
-				"SQLExecutionError",
-				fmt.Sprintf("failed to execute statement %d", i+1),
-				err,
-			)
-		}
+		res, err := db.ExecContext(ctx, stmt)
+		e.execCallback(e, db, stmt, res, command.WrapError(
+			"SQLExecutionError",
+			fmt.Sprintf("failed to execute statement %d", i+1),
+			err,
+		))
 	}
+
+	return nil
+}
+
+func defaultExecuteCallback(e *SQLEngine, db *sql.DB, statement string, res sql.Result, err error) error {
+	e.logger.Debug("execute statement", "sql", statement)
+	if err != nil {
+		e.logger.Error("error executing statement", err)
+		return err
+	}
+
+	var id int64
+	var rows int64
+	id, _ = res.LastInsertId()
+	rows, _ = res.RowsAffected()
+	e.logger.Debug("SQL result", "rows", rows, "id", id)
 
 	return nil
 }
