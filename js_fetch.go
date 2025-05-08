@@ -82,7 +82,7 @@ func (b *jsBody) arrayBuffer() func() *goja.Promise {
 	}
 }
 
-func (e *JSEngine) setupFetch(vm *goja.Runtime) error {
+func (e *JSEngine) SetupFetch(vm *goja.Runtime) error {
 	return vm.Set("fetch", func(call goja.FunctionCall) goja.Value {
 		promise, resolve, reject := vm.NewPromise()
 
