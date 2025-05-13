@@ -82,7 +82,11 @@ func (b *jsBody) arrayBuffer() func() *goja.Promise {
 	}
 }
 
-func (e *JSEngine) SetupFetch(vm *goja.Runtime) error {
+func (e *JSEngine) setupFetch(vm *goja.Runtime) error {
+	return SetupFetch(vm)
+}
+
+func SetupFetch(vm *goja.Runtime) error {
 	return vm.Set("fetch", func(call goja.FunctionCall) goja.Value {
 		promise, resolve, reject := vm.NewPromise()
 
@@ -175,12 +179,12 @@ func (e *JSEngine) SetupFetch(vm *goja.Runtime) error {
 		}
 
 		go func() {
-			resp, err := e.executeFetch(urlStr, options)
+			resp, err := executeFetch(urlStr, options)
 			if err != nil {
 				reject(vm.NewGoError(err))
 				return
 			}
-			jsResp := e.createJSResponse(vm, resp)
+			jsResp := createJSResponse(vm, resp)
 			resolve(jsResp)
 		}()
 
@@ -188,7 +192,7 @@ func (e *JSEngine) SetupFetch(vm *goja.Runtime) error {
 	})
 }
 
-func (e *JSEngine) executeFetch(url string, options FetchOptions) (*FetchResponse, error) {
+func executeFetch(url string, options FetchOptions) (*FetchResponse, error) {
 	ctx, cancel := context.WithTimeout(
 		context.Background(),
 		time.Duration(options.Timeout)*time.Millisecond,
@@ -270,7 +274,7 @@ func (e *JSEngine) executeFetch(url string, options FetchOptions) (*FetchRespons
 	}, nil
 }
 
-func (e *JSEngine) createJSResponse(vm *goja.Runtime, resp *FetchResponse) goja.Value {
+func createJSResponse(vm *goja.Runtime, resp *FetchResponse) goja.Value {
 	responseObj := vm.NewObject()
 
 	_ = responseObj.Set("status", resp.Status)
