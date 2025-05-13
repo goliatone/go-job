@@ -45,6 +45,7 @@ func (p *FileSystemSourceProvider) GetScript(path string) ([]byte, error) {
 	if _, err := file.Read(content); err != nil {
 		return nil, fmt.Errorf("failed to read file %s: %w", path, err)
 	}
+
 	return content, nil
 }
 
