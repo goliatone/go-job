@@ -13,9 +13,10 @@ type SourceProvider interface {
 }
 
 type ScriptInfo struct {
-	ID      string
-	Path    string
-	Content []byte
+	ID      string         `json:"id"`
+	Path    string         `json:"path"`
+	Content []byte         `json:"content"`
+	Meta    map[string]any `json:"metadata"`
 }
 
 type TaskCreator interface {
