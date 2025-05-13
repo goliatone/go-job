@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 )
 
+var _ SourceProvider = &FileSystemSourceProvider{}
+
 type FileSystemSourceProvider struct {
 	rootDir string
 	fs      fs.FS
