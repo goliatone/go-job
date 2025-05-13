@@ -81,7 +81,7 @@ func TestTaskCreator_WithErrorHandler(t *testing.T) {
 
 	expectedErr := errors.New("test error")
 	var capturedErr error
-	customErrorHandler := func(err error) {
+	customErrorHandler := func(task job.Task, err error) {
 		assert.NotNil(t, err)
 		capturedErr = err
 	}
