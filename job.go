@@ -53,6 +53,7 @@ func (msg ExecutionMessage) Validate() error {
 // Task represents a schedulable job discovered from the filesystem
 type Task interface {
 	GetID() string
+	// GetHandler is the function that we a command needs to implement in order to be able to execute it in the background
 	GetHandler() func() error
 	GetHandlerConfig() command.HandlerConfig
 	GetConfig() Config
@@ -72,9 +73,9 @@ type TaskRunner interface {
 }
 
 type Registry interface {
+	List() []Task
 	Add(job Task) error
 	Get(id string) (Task, bool)
-	List() []Task
 }
 
 type MetadataParser interface {
