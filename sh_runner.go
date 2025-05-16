@@ -7,7 +7,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/goliatone/go-command"
+	"github.com/goliatone/go-errors"
 )
 
 type ShellEngine struct {
@@ -78,22 +78,41 @@ func (e *ShellEngine) Execute(ctx context.Context, msg *ExecutionMessage) error 
 
 	if err := cmd.Run(); err != nil {
 		e.logger.Info(stderr.String())
-		return command.WrapError(
-			"ShellExecutionError",
-			fmt.Sprintf("script execution failed: %v\nStderr: %s", err, stderr.String()),
-			err,
-		)
+		return errors.Wrap(err, errors.CategoryExternal, "script execution failed").
+			WithTextCode("SHELL_EXECUTION_ERROR").
+			WithMetadata(map[string]any{
+				"operation":   "execute_command",
+				"script_path": msg.ScriptPath,
+				"shell":       e.shell,
+				"working_dir": e.workDir,
+				"stdout":      stdout.String(),
+				"stderr":      stderr.String(),
+				"exit_code":   getExitCode(err),
+			})
 	}
 
 	e.logger.Info(stdout.String())
 
 	if exitCode := cmd.ProcessState.ExitCode(); exitCode != 0 {
-		return command.WrapError(
-			"ShellExecutionError",
-			fmt.Sprintf("script exited with non-zero status: %d\nStderr: %s", exitCode, stderr.String()),
-			nil,
-		)
+		return errors.New(errors.CategoryExternal, "script exited with non-zero status").
+			WithTextCode("SHELL_EXECUTION_ERROR").
+			WithMetadata(map[string]any{
+				"operation":   "execute_command",
+				"script_path": msg.ScriptPath,
+				"shell":       e.shell,
+				"working_dir": e.workDir,
+				"stdout":      stdout.String(),
+				"stderr":      stderr.String(),
+				"exit_code":   exitCode,
+			})
 	}
 
 	return nil
+}
+
+func getExitCode(err error) int {
+	if exitError, ok := err.(*exec.ExitError); ok {
+		return exitError.ExitCode()
+	}
+	return -1
 }
