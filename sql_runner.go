@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/goliatone/go-command"
+	"github.com/goliatone/go-errors"
 )
 
 type SQLEngine struct {
@@ -45,7 +45,15 @@ func (e *SQLEngine) Execute(ctx context.Context, msg *ExecutionMessage) error {
 
 	db, err := e.getDBConnection(execCtx, msg)
 	if err != nil {
-		return command.WrapError("SQLEngineError", "failed to establish database connection", err)
+		return errors.Wrap(err, errors.CategoryExternal, "failed to establish database connection").
+			WithTextCode("SQL_CONNECTION_ERROR").
+			WithMetadata(map[string]any{
+				"operation":   "establish_connection",
+				"script_path": msg.ScriptPath,
+				"config":      msg.Config,
+				"message_id":  msg.JobID,
+				"parameters":  msg.Parameters,
+			})
 	}
 
 	if e.db == nil {
@@ -105,7 +113,11 @@ func (e *SQLEngine) getDBConnection(ctx context.Context, msg *ExecutionMessage) 
 func (e *SQLEngine) executeInTransaction(ctx context.Context, db *sql.DB, script string) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return command.WrapError("SQLTransactionError", "failed to start transaction", err)
+		return errors.Wrap(err, errors.CategoryExternal, "failed to start transaction").
+			WithTextCode("SQL_TRANSACTION_ERROR").
+			WithMetadata(map[string]any{
+				"operation": "begin_transaction",
+			})
 	}
 
 	statements := splitSQLStatements(script, e.scriptBoundary)
@@ -113,16 +125,27 @@ func (e *SQLEngine) executeInTransaction(ctx context.Context, db *sql.DB, script
 	for i, stmt := range statements {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			tx.Rollback()
-			return command.WrapError(
-				"SQLExecutionError",
-				fmt.Sprintf("failed to execute statement transaction %d", i+1),
+			return errors.Wrap(
 				err,
-			)
+				errors.CategoryExternal,
+				fmt.Sprintf("failed to execute statement %d in transaction", i+1),
+			).
+				WithTextCode("SQL_EXECUTION_ERROR").
+				WithMetadata(map[string]any{
+					"operation":        "execute_statement",
+					"statement_index":  i + 1,
+					"total_statements": len(statements),
+					"statement":        stmt,
+				})
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		return command.WrapError("SQLTransactionError", "failed to commit transaction", err)
+		return errors.Wrap(err, errors.CategoryExternal, "failed to commit transaction").
+			WithTextCode("SQL_TRANSACTION_ERROR").
+			WithMetadata(map[string]any{
+				"operation": "commit_transaction",
+			})
 	}
 
 	return nil
@@ -134,11 +157,23 @@ func (e *SQLEngine) executeDirectly(ctx context.Context, db *sql.DB, script stri
 
 	for i, stmt := range statements {
 		res, err := db.ExecContext(ctx, stmt)
-		e.execCallback(e, db, stmt, res, command.WrapError(
-			"SQLExecutionError",
-			fmt.Sprintf("failed to execute statement %d", i+1),
-			err,
-		))
+		var callbackErr error
+		if err != nil {
+			callbackErr = errors.Wrap(
+				err,
+				errors.CategoryExternal,
+				fmt.Sprintf("failed to execute statement %d", i+1),
+			).
+				WithTextCode("SQL_EXECUTION_ERROR").
+				WithMetadata(map[string]any{
+					"operation":        "execute_statement",
+					"statement_index":  i + 1,
+					"total_statements": len(statements),
+					"statement":        stmt,
+				})
+		}
+
+		e.execCallback(e, db, stmt, res, callbackErr)
 	}
 
 	return nil
