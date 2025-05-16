@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goliatone/go-command"
+	"github.com/goliatone/go-errors"
 )
 
 type BaseEngine struct {
@@ -75,19 +75,25 @@ func (e *BaseEngine) GetScriptContent(msg *ExecutionMessage) (string, error) {
 
 	content, err := e.SourceProvider.GetScript(msg.ScriptPath)
 	if err != nil {
-		return "", command.WrapError(
-			fmt.Sprintf("%sEngineError", e.EngineType),
-			"failed to read script file",
-			err,
-		)
+		return "", errors.Wrap(err, errors.CategoryExternal, "failed to read script file").
+			WithTextCode("SCRIPT_READ_ERROR").
+			WithMetadata(map[string]any{
+				"operation":   "read_script",
+				"script_path": msg.ScriptPath,
+				"engine_type": e.EngineType,
+			})
 	}
+
 	_, scriptContent, err := e.MetadataParser.Parse(content)
 	if err != nil {
-		return "", command.WrapError(
-			fmt.Sprintf("%sEngineError", e.EngineType),
-			"failed to parse script content",
-			err,
-		)
+		return "", errors.Wrap(err, errors.CategoryInternal, "failed to parse script content").
+			WithTextCode("SCRIPT_PARSE_ERROR").
+			WithMetadata(map[string]any{
+				"operation":    "parse_script",
+				"script_path":  msg.ScriptPath,
+				"engine_type":  e.EngineType,
+				"content_size": len(content),
+			})
 	}
 	return scriptContent, nil
 }
