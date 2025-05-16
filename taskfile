@@ -92,6 +92,10 @@ function dev:env:load {
     eval "$(envset development --isolated=true)"
 }
 
+function dev:test {
+    lgr exec -- go test ./...
+}
+
 ##
 ## ########################################
 ##           Version Management
