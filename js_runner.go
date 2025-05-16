@@ -14,6 +14,7 @@ import (
 	"github.com/dop251/goja_nodejs/require"
 	"github.com/dop251/goja_nodejs/url"
 	"github.com/goliatone/go-command"
+	"github.com/goliatone/go-errors"
 )
 
 type JSEngine struct {
@@ -51,7 +52,7 @@ func (e *JSEngine) Execute(ctx context.Context, msg *ExecutionMessage) error {
 
 	scriptContent, err := e.GetScriptContent(msg)
 	if err != nil {
-		return command.WrapError("JSEngineError", "failed to get script content", err)
+		return err
 	}
 
 	execCtx, cancel := e.GetExecutionContext(ctx)
@@ -92,20 +93,23 @@ func (e *JSEngine) Execute(ctx context.Context, msg *ExecutionMessage) error {
 	})
 
 	if !ok {
-		return command.WrapError(
-			"JSEngineError",
-			"loop was terminated before configuration",
-			nil,
-		)
+		return errors.New(errors.CategoryInternal, "loop was terminated before configuration").
+			WithTextCode("JS_LOOP_TERMINATED").
+			WithMetadata(map[string]any{
+				"operation":   "configure_loop",
+				"script_path": msg.ScriptPath,
+				"phase":       "pre_configuration",
+			})
 	}
 
 	if err := <-configErrCh; err != nil {
 		loop.Terminate()
-		return command.WrapError(
-			"JSEngineError",
-			"failed to configure the VM environment",
-			err,
-		)
+		return errors.Wrap(err, errors.CategoryInternal, "failed to configure the VM environment").
+			WithTextCode("JS_VM_CONFIG_ERROR").
+			WithMetadata(map[string]any{
+				"operation":   "configure_vm",
+				"script_path": msg.ScriptPath,
+			})
 	}
 
 	execErrCh := make(chan error, 1)
@@ -115,38 +119,58 @@ func (e *JSEngine) Execute(ctx context.Context, msg *ExecutionMessage) error {
 	})
 
 	if !ok {
-		return command.WrapError(
-			"JSEngineError",
-			"loop was terminated before running script",
-			nil,
-		)
+		return errors.New(errors.CategoryInternal, "loop was terminated before running script").
+			WithTextCode("JS_LOOP_TERMINATED").
+			WithMetadata(map[string]any{
+				"operation":   "execute_script",
+				"script_path": msg.ScriptPath,
+				"phase":       "pre_execution",
+			})
 	}
 
 	select {
 	case err := <-execErrCh:
 		loop.Stop()
 		if err != nil {
-			return command.WrapError(
-				"JSExecutionError",
-				"script execution failed",
-				err,
-			)
+			return errors.Wrap(err, errors.CategoryInternal, "script execution failed").
+				WithTextCode("JS_EXECUTION_ERROR").
+				WithMetadata(map[string]any{
+					"operation":   "run_script",
+					"script_path": msg.ScriptPath,
+				})
 		}
 		return nil
 	case <-execCtx.Done():
 		loop.Terminate()
-		return command.WrapError("JSExecutionTimeout", "script execution timed out", execCtx.Err())
+		return errors.Wrap(execCtx.Err(), errors.CategoryExternal, "script execution timed out").
+			WithTextCode("JS_EXECUTION_TIMEOUT").
+			WithMetadata(map[string]any{
+				"operation":   "execute_script",
+				"script_path": msg.ScriptPath,
+				"timeout":     "context_deadline",
+			})
 	}
 }
 
 func (e *JSEngine) configureScriptEnvironment(vm *goja.Runtime, msg *ExecutionMessage) error {
 	scriptDir := filepath.Dir(msg.ScriptPath)
 	if err := vm.Set("__dirname", scriptDir); err != nil {
-		return fmt.Errorf("failed to set __dirname: %w", err)
+		return errors.Wrap(err, errors.CategoryInternal, "failed to set __dirname").
+			WithTextCode("JS_SET_DIRNAME_ERROR").
+			WithMetadata(map[string]any{
+				"operation":   "set_dirname",
+				"script_path": msg.ScriptPath,
+				"dirname":     scriptDir,
+			})
 	}
 
 	if err := vm.Set("__filename", msg.ScriptPath); err != nil {
-		return fmt.Errorf("failed to set __filename: %w", err)
+		return errors.Wrap(err, errors.CategoryInternal, "failed to set __filename").
+			WithTextCode("JS_SET_FILENAME_ERROR").
+			WithMetadata(map[string]any{
+				"operation":   "set_filename",
+				"script_path": msg.ScriptPath,
+			})
 	}
 
 	if msg.Parameters != nil {
@@ -156,11 +180,14 @@ func (e *JSEngine) configureScriptEnvironment(vm *goja.Runtime, msg *ExecutionMe
 			}
 
 			if err := vm.Set(k, v); err != nil {
-				return command.WrapError(
-					"JSEngineError",
-					fmt.Sprintf("failed to set parameter %s", k),
-					err,
-				)
+				return errors.Wrap(err, errors.CategoryInternal, fmt.Sprintf("failed to set parameter %s", k)).
+					WithTextCode("JS_SET_PARAMETER_ERROR").
+					WithMetadata(map[string]any{
+						"operation":      "set_parameter",
+						"script_path":    msg.ScriptPath,
+						"parameter_name": k,
+						"parameter_type": fmt.Sprintf("%T", v),
+					})
 			}
 		}
 	}
@@ -168,11 +195,13 @@ func (e *JSEngine) configureScriptEnvironment(vm *goja.Runtime, msg *ExecutionMe
 	if msg.Config.Env != nil {
 		for k, v := range msg.Config.Env {
 			if err := vm.Set(k, v); err != nil {
-				return command.WrapError(
-					"JSEngineError",
-					fmt.Sprintf("failed to set env var %s", k),
-					err,
-				)
+				return errors.Wrap(err, errors.CategoryInternal, fmt.Sprintf("failed to set env var %s", k)).
+					WithTextCode("JS_SET_ENV_ERROR").
+					WithMetadata(map[string]any{
+						"operation":   "set_environment_variable",
+						"script_path": msg.ScriptPath,
+						"env_name":    k,
+					})
 			}
 		}
 	}
