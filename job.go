@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/goliatone/go-command"
+	"github.com/goliatone/go-errors"
 )
 
 type SourceProvider interface {
@@ -40,13 +41,28 @@ func (msg ExecutionMessage) Type() string {
 
 // Validate ensures the message contains required fields
 func (msg ExecutionMessage) Validate() error {
+	var fieldErrors []errors.FieldError
+
 	if msg.JobID == "" {
-		return command.WrapError("InvalidJobMessage", "job ID cannot be empty", nil)
+		fieldErrors = append(fieldErrors, errors.FieldError{
+			Field:   "job_id",
+			Message: "cannot be empty",
+			Value:   msg.JobID,
+		})
 	}
 
 	if msg.ScriptPath == "" {
-		return command.WrapError("InvalidJobMessage", "script path cannot be empty", nil)
+		fieldErrors = append(fieldErrors, errors.FieldError{
+			Field:   "script_path",
+			Message: "cannot be empty",
+			Value:   msg.ScriptPath,
+		})
 	}
+
+	if len(fieldErrors) > 0 {
+		return errors.NewValidation("execution message validation failed", fieldErrors...)
+	}
+
 	return nil
 }
 
