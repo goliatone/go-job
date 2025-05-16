@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
-	"github.com/goliatone/go-command"
+	"github.com/goliatone/go-errors"
 )
 
 // FetchOptions represents the options for the fetch function
@@ -207,11 +207,14 @@ func executeFetch(url string, options FetchOptions) (*FetchResponse, error) {
 		default:
 			jsonData, err := json.Marshal(options.Body)
 			if err != nil {
-				return nil, command.WrapError(
-					"FetchError",
-					"failed to marshal request body",
-					err,
-				)
+				return nil, errors.Wrap(err, errors.CategoryInternal, "failed to marshal request body").
+					WithTextCode("FETCH_MARSHAL_ERROR").
+					WithMetadata(map[string]any{
+						"operation": "marshal_body",
+						"url":       url,
+						"method":    options.Method,
+						"body_type": fmt.Sprintf("%T", options.Body),
+					})
 			}
 			reqBody = io.NopCloser(strings.NewReader(string(jsonData)))
 
@@ -224,11 +227,13 @@ func executeFetch(url string, options FetchOptions) (*FetchResponse, error) {
 
 	req, err := http.NewRequestWithContext(ctx, options.Method, url, reqBody)
 	if err != nil {
-		return nil, command.WrapError(
-			"FetchError",
-			"failed to create request",
-			err,
-		)
+		return nil, errors.Wrap(err, errors.CategoryBadInput, "failed to create request").
+			WithTextCode("FETCH_REQUEST_ERROR").
+			WithMetadata(map[string]any{
+				"operation": "create_request",
+				"url":       url,
+				"method":    options.Method,
+			})
 	}
 
 	for key, value := range options.Headers {
@@ -241,21 +246,28 @@ func executeFetch(url string, options FetchOptions) (*FetchResponse, error) {
 
 	httpResp, err := client.Do(req)
 	if err != nil {
-		return nil, command.WrapError(
-			"FetchError",
-			"request failed",
-			err,
-		)
+		return nil, errors.Wrap(err, errors.CategoryExternal, "request failed").
+			WithTextCode("FETCH_EXECUTION_ERROR").
+			WithMetadata(map[string]any{
+				"operation": "execute_request",
+				"url":       url,
+				"method":    options.Method,
+				"timeout":   options.Timeout,
+			})
 	}
 	defer httpResp.Body.Close()
 
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return nil, command.WrapError(
-			"FetchError",
-			"failed to read response body",
-			err,
-		)
+		return nil, errors.Wrap(err, errors.CategoryExternal, "failed to read response body").
+			WithTextCode("FETCH_READ_BODY_ERROR").
+			WithMetadata(map[string]any{
+				"operation":    "read_response_body",
+				"url":          url,
+				"method":       options.Method,
+				"status_code":  httpResp.StatusCode,
+				"content_type": httpResp.Header.Get("Content-Type"),
+			})
 	}
 
 	headers := make(map[string][]string)
