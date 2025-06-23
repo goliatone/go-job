@@ -94,7 +94,7 @@ func (e *ShellEngine) Execute(ctx context.Context, msg *ExecutionMessage) error 
 	e.logger.Info(stdout.String())
 
 	if exitCode := cmd.ProcessState.ExitCode(); exitCode != 0 {
-		return errors.New(errors.CategoryExternal, "script exited with non-zero status").
+		return errors.New("script exited with non-zero status", errors.CategoryExternal).
 			WithTextCode("SHELL_EXECUTION_ERROR").
 			WithMetadata(map[string]any{
 				"operation":   "execute_command",
