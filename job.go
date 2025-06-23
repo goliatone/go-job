@@ -26,7 +26,6 @@ type TaskCreator interface {
 
 // ExecutionMessage represents a request to execute a job script
 type ExecutionMessage struct {
-	command.BaseMessage
 	JobID          string
 	ScriptPath     string
 	Config         Config
