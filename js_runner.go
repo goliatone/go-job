@@ -93,7 +93,7 @@ func (e *JSEngine) Execute(ctx context.Context, msg *ExecutionMessage) error {
 	})
 
 	if !ok {
-		return errors.New(errors.CategoryInternal, "loop was terminated before configuration").
+		return errors.New("loop was terminated before configuration", errors.CategoryInternal).
 			WithTextCode("JS_LOOP_TERMINATED").
 			WithMetadata(map[string]any{
 				"operation":   "configure_loop",
@@ -119,7 +119,7 @@ func (e *JSEngine) Execute(ctx context.Context, msg *ExecutionMessage) error {
 	})
 
 	if !ok {
-		return errors.New(errors.CategoryInternal, "loop was terminated before running script").
+		return errors.New("loop was terminated before running script", errors.CategoryInternal).
 			WithTextCode("JS_LOOP_TERMINATED").
 			WithMetadata(map[string]any{
 				"operation":   "execute_script",
