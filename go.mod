@@ -5,7 +5,7 @@ go 1.23.4
 require (
 	github.com/dop251/goja v0.0.0-20250309171923-bcd7cc6bf64c
 	github.com/dop251/goja_nodejs v0.0.0-20250314160716-c55ecee183c0
-	github.com/goliatone/go-command v0.2.0
+	github.com/goliatone/go-command v0.4.0
 	github.com/goliatone/go-errors v0.4.0
 	github.com/mattn/go-sqlite3 v1.14.28
 	github.com/stretchr/testify v1.10.0
@@ -13,6 +13,7 @@ require (
 )
 
 require (
+	github.com/alecthomas/kong v1.11.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/dop251/base64dec v0.0.0-20231022112746-c6c9f9a96217 // indirect
