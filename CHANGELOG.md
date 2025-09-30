@@ -1,5 +1,44 @@
 # Changelog
 
+# [0.4.0](https://github.com/goliatone/go-job/compare/v0.3.0...v0.4.0) - (2025-09-30)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Remove base message ([437f92b](https://github.com/goliatone/go-job/commit/437f92b139e0e10eaa9c9a500145beb4d3239290))  - (goliatone)
+- Update task creator test ([32c60cc](https://github.com/goliatone/go-job/commit/32c60cc2f6836d56fb79cdd227565bba20cde422))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.4.0 ([6591fe5](https://github.com/goliatone/go-job/commit/6591fe5ca022036628d88002e919047937992aae))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Updated definition of ScriptInfo ([c22c188](https://github.com/goliatone/go-job/commit/c22c1880542b52a450b2b2a3fce5b8e804d92ebd))  - (goliatone)
+- DB source provider ([2c23ae0](https://github.com/goliatone/go-job/commit/2c23ae005bbb2e8b756e8ef0853c01d59c103b40))  - (goliatone)
+- Ensure FS source provider conforms to interface ([a6a62f0](https://github.com/goliatone/go-job/commit/a6a62f01f60934d07c84537ae0ae26074e3986af))  - (goliatone)
+
+## <!-- 2 -->🚜 Refactor
+
+- Use errors package ([5448938](https://github.com/goliatone/go-job/commit/5448938f8f2fdb3f0045083ac27521486ade5bc6))  - (goliatone)
+- Rename to source_provider_fs ([2f45996](https://github.com/goliatone/go-job/commit/2f4599612c53e19cc1545809dfef67ff8e848b0c))  - (goliatone)
+- Make set fetch public ([664d02a](https://github.com/goliatone/go-job/commit/664d02a04f727fa4868b67c6440dc48aafdd0129))  - (goliatone)
+
+## <!-- 22 -->🚧 WIP
+
+- Refactor errors ([7a273e5](https://github.com/goliatone/go-job/commit/7a273e5c999928ca35f4dd2bef04b459b0783f99))  - (goliatone)
+- Make goja fetch implementation public ([4526c60](https://github.com/goliatone/go-job/commit/4526c6002bb3ac0d2d351539fb45793ae92a0c33))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.3.0 ([bf3995a](https://github.com/goliatone/go-job/commit/bf3995add020f2bbdf764ac546f55b74cfb1c396))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update deps ([42d29c2](https://github.com/goliatone/go-job/commit/42d29c2c0b20a01b0c0bebc46a085cd5023c8494))  - (goliatone)
+- Add dev:test task ([addc756](https://github.com/goliatone/go-job/commit/addc756478926b4728e8ecee1c3569a224dee3a1))  - (goliatone)
+- Update docs ([0495cb6](https://github.com/goliatone/go-job/commit/0495cb634ed973e2ed109dd35f222ebf19521fd3))  - (goliatone)
+- Fix cliff ([ca35da9](https://github.com/goliatone/go-job/commit/ca35da92f8056911862103b12d0215f074055181))  - (goliatone)
+
 # [0.3.0](https://github.com/goliatone/go-job/compare/v0.2.0...v0.3.0) - (2025-04-14)
 
 ## <!-- 13 -->📦 Bumps
@@ -9,18 +48,6 @@
 ## <!-- 2 -->🚜 Refactor
 
 - Use unified logger ([c9c55a8](https://github.com/goliatone/go-job/commit/c9c55a85eb02eea37ba7a995d0076bb40f225f5d))  - (goliatone)
-- Use unified logger ([cd741e4](https://github.com/goliatone/go-job/commit/cd741e4d80ae3f6eae96b6d3de146da1915911b5))  - (goliatone)
-- Use unified logger ([5010bab](https://github.com/goliatone/go-job/commit/5010bab8ea386a327bb8db520c84bf75ebdd3ea3))  - (goliatone)
-- Use unified logger ([13758df](https://github.com/goliatone/go-job/commit/13758dfb661ee457319c0a680c2bea47bf2dc250))  - (goliatone)
-- Use unified logger ([9986351](https://github.com/goliatone/go-job/commit/9986351fe2dea3e5498daa101000ece60077df43))  - (goliatone)
-- Use unified logger ([9e14312](https://github.com/goliatone/go-job/commit/9e143124d574bae26981bcc82e8c1d9ff4371057))  - (goliatone)
-- Use unified logger ([5279768](https://github.com/goliatone/go-job/commit/5279768ade3a5534e3e72280e77bf16078f2ef8e))  - (goliatone)
-- Use unified logger ([c174861](https://github.com/goliatone/go-job/commit/c1748614ad554f7795095e6c2303e0012a62d010))  - (goliatone)
-- Use unified logger ([847caa9](https://github.com/goliatone/go-job/commit/847caa9b7dbeda06a6970257e6e6eff93f382f3e))  - (goliatone)
-- Use unified logger ([5b11bfa](https://github.com/goliatone/go-job/commit/5b11bfa496f27e4f6942fe4fbe8086860d69f036))  - (goliatone)
-- Use unified logger ([30d6bb1](https://github.com/goliatone/go-job/commit/30d6bb1836dafe30843d6820a2e53fd86c3c1b1c))  - (goliatone)
-- Use unified logger ([3635512](https://github.com/goliatone/go-job/commit/36355128d9f04f3722ee77cdb9333691f9b71855))  - (goliatone)
-- Use unified logger ([07b9613](https://github.com/goliatone/go-job/commit/07b96133266495b4cefe233c708b2a3688c88e3e))  - (goliatone)
 
 ## <!-- 3 -->📚 Documentation
 
@@ -55,12 +82,8 @@
 ## <!-- 1 -->🐛 Bug Fixes
 
 - Make env optional ([ae051f6](https://github.com/goliatone/go-job/commit/ae051f6ab5ae0d91512370c43b44f62f4a2a4ee9))  - (goliatone)
-- Make env optional ([b92b26f](https://github.com/goliatone/go-job/commit/b92b26fce97b31f47a6811bde0f2e700e5a94aa5))  - (goliatone)
 - Refactor setup ([6f0a9cc](https://github.com/goliatone/go-job/commit/6f0a9cc9c4a4eac2558e391e5ea8c91c1a80b8e9))  - (goliatone)
-- Refactor setup ([d070b41](https://github.com/goliatone/go-job/commit/d070b41db7a69e71b408e3c6b2a95ee203d29f21))  - (goliatone)
 - Update interfaces ([ce3a09c](https://github.com/goliatone/go-job/commit/ce3a09cd71e361e1915f4c1bc51c05a1d870a9d2))  - (goliatone)
-- Update interfaces ([85c33c2](https://github.com/goliatone/go-job/commit/85c33c23e7a26028721fa4b3c8ca82733e888863))  - (goliatone)
-- Update interfaces ([c2f2948](https://github.com/goliatone/go-job/commit/c2f29482519e649a108d88bb895c49490a2b3587))  - (goliatone)
 - Clean path before searching ([4b7af33](https://github.com/goliatone/go-job/commit/4b7af3348d8d9bf33e658ebfbc73e66aa000afb9))  - (goliatone)
 - Use a cron job interface for handler ([4b8fa0a](https://github.com/goliatone/go-job/commit/4b8fa0ae9eb212351bfbbef6872a641bb68af4d0))  - (goliatone)
 - Initialize source provider if nil ([9bd459d](https://github.com/goliatone/go-job/commit/9bd459d131e7ac85330235f9ce173be975d13550))  - (goliatone)
@@ -76,10 +99,8 @@
 ## <!-- 16 -->➕ Add
 
 - Support JS block comments ([9e5c9fa](https://github.com/goliatone/go-job/commit/9e5c9fa020cc13b89dabe61e0a256d58fb984728))  - (goliatone)
-- Support JS block comments ([a9fddd3](https://github.com/goliatone/go-job/commit/a9fddd31471e25c92c52e2f06cca91774bda8bc4))  - (goliatone)
 - Update tests ([1d63115](https://github.com/goliatone/go-job/commit/1d631156b15ac7ad360b977480668b9a86e33053))  - (goliatone)
 - Default values configurable ([2c56683](https://github.com/goliatone/go-job/commit/2c566839dd668f516cc3dd968435c2d1f774b62c))  - (goliatone)
-- Default values configurable ([d680003](https://github.com/goliatone/go-job/commit/d68000385da6f358d6e8993da0b1598998689c1e))  - (goliatone)
 - Use constructor functions ([f683f9a](https://github.com/goliatone/go-job/commit/f683f9ae2526c8136aecc5819f9e3d8f7ba1639e))  - (goliatone)
 - Constructor to registry ([767b9be](https://github.com/goliatone/go-job/commit/767b9be56e8914468b1433371da438638ddfa6fe))  - (goliatone)
 - Json tags to config ([0675d3a](https://github.com/goliatone/go-job/commit/0675d3aabc3e5e8c2ccd6e1d56b1639711f94acd))  - (goliatone)
@@ -112,33 +133,18 @@
 ## <!-- 2 -->🚜 Refactor
 
 - Rename constructors ([409be1d](https://github.com/goliatone/go-job/commit/409be1d2ff0d6642eb4ee06557820a2fd6c6003d))  - (goliatone)
-- Rename constructors ([9597b6d](https://github.com/goliatone/go-job/commit/9597b6de1538149b8a3caa4194c8c5e28b3f8536))  - (goliatone)
-- Rename constructors ([0af0e2a](https://github.com/goliatone/go-job/commit/0af0e2a55e4a3edfa7a2ef568e676ff37c94f9f1))  - (goliatone)
 - Move files around ([5f87072](https://github.com/goliatone/go-job/commit/5f8707220b9274fd87826475accac3d09cb71b22))  - (goliatone)
 - Temp fix for non oop nature of go ([c33116c](https://github.com/goliatone/go-job/commit/c33116cc4b256372635f092e56424e82b410a71d))  - (goliatone)
-- Temp fix for non oop nature of go ([b08ac7f](https://github.com/goliatone/go-job/commit/b08ac7f7f759eeb8a4c089550a5ffe132b3b5d7e))  - (goliatone)
-- Temp fix for non oop nature of go ([52067c0](https://github.com/goliatone/go-job/commit/52067c0750a62b4e2a1d6364a357b42e2bda0ada))  - (goliatone)
-- Temp fix for non oop nature of go ([0929480](https://github.com/goliatone/go-job/commit/09294800906de13eb0eb855f41616c065aa12217))  - (goliatone)
-- Temp fix for non oop nature of go ([60c5c27](https://github.com/goliatone/go-job/commit/60c5c27ef62b1c7f8cf86486f1158139e3da85e5))  - (goliatone)
-- Temp fix for non oop nature of go ([2c4911a](https://github.com/goliatone/go-job/commit/2c4911a62585cf0341c4ae97f8320c94ee8e5b43))  - (goliatone)
 - Rename task creator ([c25afe1](https://github.com/goliatone/go-job/commit/c25afe10d914db49df79459b47a9039d3d5e1f1d))  - (goliatone)
 - Remove unused methods ([d130cd5](https://github.com/goliatone/go-job/commit/d130cd51ce74e004881f4b16bfd2f63c426612d6))  - (goliatone)
-- Remove unused methods ([40ee643](https://github.com/goliatone/go-job/commit/40ee643d1f3b9f84940c48a0f58fbedc5a9b4bab))  - (goliatone)
-- Remove unused methods ([1ff0b2f](https://github.com/goliatone/go-job/commit/1ff0b2fe4d8e4d5597686bcbea76837c4ce3f87c))  - (goliatone)
-- Rename task creator ([f668e6e](https://github.com/goliatone/go-job/commit/f668e6e9c644f81a8a05a2bcfe5d9b76393e0039))  - (goliatone)
 - Fs out of runner ([6864181](https://github.com/goliatone/go-job/commit/6864181ffdaca9a2f13e0898efc0576f075093e3))  - (goliatone)
-- Fs out of runner ([79dea0a](https://github.com/goliatone/go-job/commit/79dea0a55e5d90f1b9e4b295900258bb690f0aee))  - (goliatone)
 
 ## <!-- 22 -->🚧 WIP
 
 - Support block comments ([ec6abab](https://github.com/goliatone/go-job/commit/ec6abab21255594ced1064142cde8912b35c3c7d))  - (goliatone)
 - Refactor how we handle meta config ([f11ec11](https://github.com/goliatone/go-job/commit/f11ec1198a3c256dadaf5b771c284bbc79357e9f))  - (goliatone)
-- Refactor how we handle meta config ([1976c72](https://github.com/goliatone/go-job/commit/1976c72c221f1fc409f75353cfe164493433077e))  - (goliatone)
 - Rewrite the parser, simpler... ([26caf8c](https://github.com/goliatone/go-job/commit/26caf8c7ee15552296b086e4a632a8b24ffe3c26))  - (goliatone)
 - Refactor interface ([6ab939f](https://github.com/goliatone/go-job/commit/6ab939f38a17e77215e48fc0bce3968d56d5868b))  - (goliatone)
-- Refactor interface ([16ae3b8](https://github.com/goliatone/go-job/commit/16ae3b87b9b87f8f2b7019ee3a4e482982e03644))  - (goliatone)
-- Refactor interface ([2f8a88a](https://github.com/goliatone/go-job/commit/2f8a88a8cf0f2d3daec19b7a04d20fb5c9ea24b6))  - (goliatone)
-- Refactor interface ([8b5af6f](https://github.com/goliatone/go-job/commit/8b5af6f77537c956338d47990f8ba54f73b13ca6))  - (goliatone)
 - Refactor handlers ([c186beb](https://github.com/goliatone/go-job/commit/c186beb5cb763ee1597686aa403ff34aa41f7ed0))  - (goliatone)
 - Using custom handler ([ed56db5](https://github.com/goliatone/go-job/commit/ed56db5c8a81cff5e022cd840ba89b570dc37900))  - (goliatone)
 - Running require ([3bd2882](https://github.com/goliatone/go-job/commit/3bd28825e482ed0fa56db2cc816fdd7c4a670a96))  - (goliatone)
