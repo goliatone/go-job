@@ -1,5 +1,23 @@
 # Changelog
 
+# [0.5.0](https://github.com/goliatone/go-job/compare/v0.4.0...v0.5.0) - (2025-09-30)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.5.0 ([d070a90](https://github.com/goliatone/go-job/commit/d070a906f4f57fb39932bee63e63ce3225e7e635))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.4.0 ([fa70d7f](https://github.com/goliatone/go-job/commit/fa70d7f1e3d3e71c97f2ba0a890ab5ce670d9b7e))  - (goliatone)
+
+## <!-- 30 -->📝 Other
+
+- PR [#1](https://github.com/goliatone/go-job/pull/1): github.com/goliatone/go-job to v0.9.0 ([85ef366](https://github.com/goliatone/go-job/commit/85ef3669184cfc512c472c4a230cebb871f81f97))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- **deps:** Bump {{ .Module }} to {{ .Version }} ([748bfaf](https://github.com/goliatone/go-job/commit/748bfaf95a01aa264aab5b8d16c94bececab1bd8))  - (goliatone)
+
 # [0.4.0](https://github.com/goliatone/go-job/compare/v0.3.0...v0.4.0) - (2025-09-30)
 
 ## <!-- 1 -->🐛 Bug Fixes
