@@ -186,9 +186,9 @@ func (e *SQLEngine) executeDirectly(ctx context.Context, db *sql.DB, script stri
 
 	for i, stmt := range statements {
 		res, err := db.ExecContext(ctx, stmt)
-		var callbackErr error
+		var wrappedErr error
 		if err != nil {
-			callbackErr = errors.Wrap(
+			wrappedErr = errors.Wrap(
 				err,
 				errors.CategoryExternal,
 				fmt.Sprintf("failed to execute statement %d", i+1),
@@ -202,7 +202,12 @@ func (e *SQLEngine) executeDirectly(ctx context.Context, db *sql.DB, script stri
 				})
 		}
 
-		e.execCallback(e, db, stmt, res, callbackErr)
+		if callbackErr := e.execCallback(e, db, stmt, res, wrappedErr); callbackErr != nil {
+			return callbackErr
+		}
+		if wrappedErr != nil {
+			return wrappedErr
+		}
 	}
 
 	return nil
