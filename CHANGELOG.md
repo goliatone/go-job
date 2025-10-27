@@ -1,5 +1,32 @@
 # Changelog
 
+# [0.7.0](https://github.com/goliatone/go-job/compare/v0.6.0...v0.7.0) - (2025-10-27)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.7.0 ([8f6e9b1](https://github.com/goliatone/go-job/commit/8f6e9b1de2eb70c74e1a6caf174144aa5471d9f3))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Schedule ([f8d1fac](https://github.com/goliatone/go-job/commit/f8d1facee7c04b1b417534649631a8f777852b08))  - (goliatone)
+- Logger provider ([b09cc7b](https://github.com/goliatone/go-job/commit/b09cc7bdd104a74f7e65d965b282d429461750fe))  - (goliatone)
+- Better base logging ([04c04c2](https://github.com/goliatone/go-job/commit/04c04c2549c75898edcb744c1cd916892fef172d))  - (goliatone)
+- Base logger refined ([b3b177c](https://github.com/goliatone/go-job/commit/b3b177c84984bd9a24857384ec2bd7454678924b))  - (goliatone)
+- Better errors and logger ([178130f](https://github.com/goliatone/go-job/commit/178130f079a1bbff98d2f102ba81a7136ced878b))  - (goliatone)
+- Logger provider interface ([7da7ff2](https://github.com/goliatone/go-job/commit/7da7ff2b52381e56d71cb80b5e955c7812186fce))  - (goliatone)
+- Task creator emit events ([f542658](https://github.com/goliatone/go-job/commit/f5426583b86dfc20e947804c5f1c45dc0a3d0d7b))  - (goliatone)
+- Task provider implementation ([46059ad](https://github.com/goliatone/go-job/commit/46059ad012f6e7467d17195d3e48f1e9eed9aa7a))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.6.0 ([a6d8501](https://github.com/goliatone/go-job/commit/a6d8501bc83792d6a54b919cc9a89e9876ee51a6))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update deps ([4e02020](https://github.com/goliatone/go-job/commit/4e02020d86f85047c7b3490651175b96b8788b4b))  - (goliatone)
+- Update readme ([36a8c04](https://github.com/goliatone/go-job/commit/36a8c04a2351a3680bd44fb06db0392f87994d0a))  - (goliatone)
+- Update tests ([1f4f800](https://github.com/goliatone/go-job/commit/1f4f800235efe6a1e2d7bbc50dcf12851c4cc4c3))  - (goliatone)
+
 # [0.6.0](https://github.com/goliatone/go-job/compare/v0.5.0...v0.6.0) - (2025-10-27)
 
 ## <!-- 1 -->🐛 Bug Fixes
