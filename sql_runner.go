@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/goliatone/go-errors"
 )
@@ -47,6 +48,17 @@ func (e *SQLEngine) Execute(ctx context.Context, msg *ExecutionMessage) error {
 		return err
 	}
 
+	logger := e.logger
+	if fl, ok := logger.(FieldsLogger); ok {
+		logger = fl.WithFields(map[string]any{
+			"engine":      e.EngineType,
+			"script_path": msg.ScriptPath,
+		})
+	}
+
+	logger.Debug("sql script starting", "script_path", msg.ScriptPath)
+	start := time.Now()
+
 	execCtx, cancel := e.GetExecutionContext(ctx)
 	defer cancel()
 
@@ -74,11 +86,21 @@ func (e *SQLEngine) Execute(ctx context.Context, msg *ExecutionMessage) error {
 		useTransaction = false
 	}
 
+	var execErr error
 	if useTransaction {
-		return e.executeInTransaction(execCtx, db, scriptContent)
+		execErr = e.executeInTransaction(execCtx, db, scriptContent)
+	} else {
+		execErr = e.executeDirectly(execCtx, db, scriptContent)
 	}
 
-	return e.executeDirectly(execCtx, db, scriptContent)
+	duration := time.Since(start)
+	if execErr != nil {
+		logger.Error("sql script failed", "script_path", msg.ScriptPath, "duration", duration, "error", execErr)
+		return execErr
+	}
+
+	logger.Info("sql script completed", "script_path", msg.ScriptPath, "duration", duration)
+	return nil
 }
 
 func (e *SQLEngine) getDBConnection(ctx context.Context, msg *ExecutionMessage) (*sql.DB, error) {
