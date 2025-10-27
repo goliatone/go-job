@@ -34,6 +34,13 @@ func NewShellRunner(opts ...ShellOption) *ShellEngine {
 	return e
 }
 
+// SetTaskIDProvider overrides the ID derivation strategy for tasks parsed by the shell engine.
+func (e *ShellEngine) SetTaskIDProvider(provider TaskIDProvider) {
+	if e.BaseEngine != nil {
+		e.BaseEngine.SetTaskIDProvider(provider)
+	}
+}
+
 func (e *ShellEngine) Execute(ctx context.Context, msg *ExecutionMessage) error {
 	scriptContent, err := e.GetScriptContent(msg)
 	if err != nil {
