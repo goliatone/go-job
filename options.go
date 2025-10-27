@@ -2,6 +2,16 @@ package job
 
 type Option func(*Runner)
 
+func WithLoggerProvider(provider LoggerProvider) Option {
+	return func(r *Runner) {
+		if provider == nil {
+			provider = newStdLoggerProvider()
+		}
+		r.loggerProvider = provider
+		r.propagateLoggerProvider()
+	}
+}
+
 func WithErrorHandler(handler func(Task, error)) Option {
 	return func(fsjr *Runner) {
 		if handler != nil {
