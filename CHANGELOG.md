@@ -1,5 +1,23 @@
 # Changelog
 
+# [0.6.0](https://github.com/goliatone/go-job/compare/v0.5.0...v0.6.0) - (2025-10-27)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Implement defaultLogger ([33531ef](https://github.com/goliatone/go-job/commit/33531ef0cd62d7c2d5cc461fd4fc5205b2c51210))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.6.0 ([fb39c16](https://github.com/goliatone/go-job/commit/fb39c16e8b4150cc07c222f1c0fa6e40f410465b))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.5.0 ([fe9b6c2](https://github.com/goliatone/go-job/commit/fe9b6c2f993d627e067f25fbbb8066806ec47767))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update readme ([9b84f1c](https://github.com/goliatone/go-job/commit/9b84f1c0f578628ea75f94b8865a8c8184b1161c))  - (goliatone)
+
 # [0.5.0](https://github.com/goliatone/go-job/compare/v0.4.0...v0.5.0) - (2025-09-30)
 
 ## <!-- 13 -->📦 Bumps
