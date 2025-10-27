@@ -38,6 +38,7 @@ go-job is a flexible job runner and scheduler written in Go that allows you to e
 - **Configurable Registry:** Store and retrieve jobs with the in-memory registry
 - **Runner:** Orchestrates job discovery, task creation, and registration
 - **Task Scheduling:** Integration with cron-based schedulers for automated job execution
+- **Scheduling Helpers:** Derive upcoming run times and task scheduling metadata without re-parsing YAML
 - **Robust Timeout Handling:** Configure timeouts at both the engine and job level
 - **Metadata-driven Configuration:** Extract job configuration directly from script file comments
 - **Customizable Logging:** Pluggable logger interface for integration with existing logging frameworks
@@ -113,6 +114,13 @@ func main() {
     // Get all discovered tasks
     tasks := runner.RegisteredTasks()
     log.Printf("Discovered %d tasks\n", len(tasks))
+    for _, task := range tasks {
+        schedule := job.TaskScheduleFromTask(task)
+        log.Printf(
+            "Task %s -> expression=%s run_once=%t retries=%d timeout=%s\n",
+            task.GetID(), schedule.Expression, schedule.RunOnce, schedule.MaxRetries, schedule.Timeout,
+        )
+    }
 
     // Create a scheduler
     scheduler := cron.NewScheduler()
@@ -451,3 +459,35 @@ go-job uses a modular architecture with several key components:
 
 ## License
 MIT
+### Scheduling Helpers
+
+`go-job` exposes utilities to inspect and utilise scheduling metadata without re-reading script files.
+
+```go
+package main
+
+import (
+    "fmt"
+    "time"
+
+    "github.com/goliatone/go-job"
+)
+
+func main() {
+    // Compute the next execution time for a cron expression using the same parser
+    next, err := job.NextRun("0 */2 * * *", time.Now())
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println("Next run:", next)
+
+    // Enable second-level precision when required
+    nextSeconds, _ := job.NextRun("*/15 * * * * *", time.Now(), job.WithSecondsPrecision())
+    fmt.Println("Next run (seconds precision):", nextSeconds)
+
+    // Extract run semantics from a task configuration
+    cfg := job.Config{Schedule: "0 12 * * *", RunOnce: true, Retries: 2}
+    schedule := job.NewTaskSchedule(cfg)
+    fmt.Printf("Expression=%s RunOnce=%t Retries=%d\n", schedule.Expression, schedule.RunOnce, schedule.MaxRetries)
+}
+```
