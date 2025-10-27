@@ -10,14 +10,16 @@ import (
 var _ SourceProvider = &DBSourceProvider{}
 
 type DBSourceProvider struct {
-	Table string
-	DB    *sql.DB
+	Table       string
+	DB          *sql.DB
+	placeholder func(int) string
 }
 
 func NewDBSourceProvider(db *sql.DB, table string) *DBSourceProvider {
 	return &DBSourceProvider{
-		DB:    db,
-		Table: table,
+		DB:          db,
+		Table:       table,
+		placeholder: defaultPostgresPlaceholder,
 	}
 }
 
@@ -25,7 +27,7 @@ func (p *DBSourceProvider) GetScript(path string) ([]byte, error) {
 
 	path = filepath.Clean(path)
 
-	query := fmt.Sprintf("SELECT content FROM %s WHERE path = ? LIMIT 1", p.Table)
+	query := fmt.Sprintf("SELECT content FROM %s WHERE path = %s LIMIT 1", p.Table, p.placeholderFor(1))
 	var content []byte
 	err := p.DB.QueryRow(query, path).Scan(&content)
 	if err != nil {
@@ -75,4 +77,30 @@ func (p *DBSourceProvider) ListScripts(ctx context.Context) ([]ScriptInfo, error
 	}
 
 	return scripts, nil
+}
+
+// WithPlaceholder overrides the SQL placeholder generator used in parameterised queries.
+func (p *DBSourceProvider) WithPlaceholder(fn func(int) string) *DBSourceProvider {
+	if fn == nil {
+		p.placeholder = defaultPostgresPlaceholder
+		return p
+	}
+	p.placeholder = fn
+	return p
+}
+
+func (p *DBSourceProvider) placeholderFor(index int) string {
+	if p.placeholder == nil {
+		return defaultPostgresPlaceholder(index)
+	}
+	return p.placeholder(index)
+}
+
+func defaultPostgresPlaceholder(index int) string {
+	return fmt.Sprintf("$%d", index)
+}
+
+// SQLQuestionPlaceholder returns the standard question-mark placeholder used by drivers like SQLite or MySQL.
+func SQLQuestionPlaceholder(int) string {
+	return "?"
 }
