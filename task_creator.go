@@ -10,31 +10,53 @@ type taskCreator struct {
 	errorHandler   func(Task, error)
 	sourceProvider SourceProvider
 	logger         Logger
+	loggerProvider LoggerProvider
 	taskIDProvider TaskIDProvider
 	eventHandlers  []TaskEventHandler
 }
 
 func NewTaskCreator(provider SourceProvider, engines []Engine) *taskCreator {
+	loggerProvider := newStdLoggerProvider()
 	tc := &taskCreator{
 		sourceProvider: provider,
 		engines:        engines,
-		logger:         &defaultLogger{},
+		loggerProvider: loggerProvider,
+		logger:         loggerProvider.GetLogger("job:task_creator"),
 	}
 
 	tc.errorHandler = func(task Task, err error) {
 		if task != nil {
-			tc.logger.Error("task creator error", "id", task.GetID(), err)
+			tc.logger.Error("task creator error", "task_id", task.GetID(), "error", err)
 		} else {
-			tc.logger.Error("task creator error", err)
+			tc.logger.Error("task creator error", "error", err)
 		}
 	}
+
+	tc.applyLoggerProvider()
 
 	return tc
 }
 
 func (f *taskCreator) WithLogger(logger Logger) *taskCreator {
-	f.logger = logger
+	f.SetLogger(logger)
 	return f
+}
+
+func (f *taskCreator) SetLogger(logger Logger) {
+	if logger == nil {
+		f.logger = f.loggerProvider.GetLogger("job:task_creator")
+		return
+	}
+	f.logger = logger
+}
+
+func (f *taskCreator) SetLoggerProvider(provider LoggerProvider) {
+	if provider == nil {
+		provider = newStdLoggerProvider()
+	}
+	f.loggerProvider = provider
+	f.logger = provider.GetLogger("job:task_creator")
+	f.applyLoggerProvider()
 }
 
 // WithTaskIDProvider sets the strategy used to derive task IDs for scripts discovered by this creator.
@@ -95,7 +117,7 @@ func (r *taskCreator) CreateTasks(ctx context.Context) ([]Task, error) {
 		}
 
 		if compatibleEngine == nil {
-			r.logger.Warn("task had no compatible engine", "path", script.Path)
+			r.logger.Warn("task skipped: no compatible engine", "script_path", script.Path, "task_id", scriptID)
 			r.emitTaskEvent(TaskEvent{
 				Type:       TaskEventRegistrationFailed,
 				TaskID:     scriptID,
@@ -119,6 +141,7 @@ func (r *taskCreator) CreateTasks(ctx context.Context) ([]Task, error) {
 			continue
 		}
 
+		r.logger.Debug("task parsed", "task_id", task.GetID(), "script_path", script.Path, "engine", compatibleEngine.Name())
 		tasks = append(tasks, task)
 	}
 	return tasks, nil
@@ -138,5 +161,16 @@ func (r *taskCreator) applyTaskIDProvider() {
 func (r *taskCreator) emitTaskEvent(event TaskEvent) {
 	for _, handler := range r.eventHandlers {
 		handler(event)
+	}
+}
+
+func (r *taskCreator) applyLoggerProvider() {
+	for _, engine := range r.engines {
+		switch eng := engine.(type) {
+		case LoggerProviderAware:
+			eng.SetLoggerProvider(r.loggerProvider)
+		case LoggerAware:
+			eng.SetLogger(r.loggerProvider.GetLogger(engine.Name()))
+		}
 	}
 }
