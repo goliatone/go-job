@@ -44,6 +44,9 @@ func (f *taskCreator) WithLogger(logger Logger) *taskCreator {
 
 func (f *taskCreator) SetLogger(logger Logger) {
 	if logger == nil {
+		if f.loggerProvider == nil {
+			f.loggerProvider = newStdLoggerProvider()
+		}
 		f.logger = f.loggerProvider.GetLogger("job:task_creator")
 		return
 	}
