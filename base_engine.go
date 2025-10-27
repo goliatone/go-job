@@ -21,6 +21,7 @@ type BaseEngine struct {
 	EngineType     string
 	Self           Engine
 	logger         Logger
+	taskIDProvider TaskIDProvider
 }
 
 func NewBaseEngine(self Engine, engingeType string, exts ...string) *BaseEngine {
@@ -32,6 +33,7 @@ func NewBaseEngine(self Engine, engingeType string, exts ...string) *BaseEngine 
 		FileExtensions: exts,
 		Self:           self,
 		logger:         &defaultLogger{},
+		taskIDProvider: DefaultTaskIDProvider,
 	}
 }
 
@@ -59,9 +61,18 @@ func (e *BaseEngine) ParseJob(path string, content []byte) (Task, error) {
 		return nil, fmt.Errorf("failed to parse metadata: %w", err)
 	}
 
-	jobID := filepath.Base(path)
+	provider := e.taskIDProvider
+	if provider == nil {
+		provider = DefaultTaskIDProvider
+	}
+	jobID := provider(path)
 	job := NewBaseTask(jobID, path, e.EngineType, config, scriptContent, e.Self)
 	return job, nil
+}
+
+// SetTaskIDProvider allows engines to override the default ID generation strategy.
+func (e *BaseEngine) SetTaskIDProvider(provider TaskIDProvider) {
+	e.taskIDProvider = provider
 }
 
 func (e *BaseEngine) GetScriptContent(msg *ExecutionMessage) (string, error) {
