@@ -44,6 +44,13 @@ func NewJSRunner(opts ...JSOption) *JSEngine {
 	return e
 }
 
+// SetTaskIDProvider overrides the ID derivation strategy for tasks parsed by the JS engine.
+func (e *JSEngine) SetTaskIDProvider(provider TaskIDProvider) {
+	if e.BaseEngine != nil {
+		e.BaseEngine.SetTaskIDProvider(provider)
+	}
+}
+
 // Execute runs a JavaScript file in a Node-like environment using goja_nodejs' eventloop.
 func (e *JSEngine) Execute(ctx context.Context, msg *ExecutionMessage) error {
 	defer e.panicHandler("JSEngine.Execute", map[string]any{

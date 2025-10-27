@@ -47,6 +47,10 @@ func (j *baseTask) GetConfig() Config {
 	return j.config
 }
 
+func (j *baseTask) GetPath() string {
+	return j.scriptPath
+}
+
 func NewBaseTask(
 	id, path, scriptType string,
 	config Config,
