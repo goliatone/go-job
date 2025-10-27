@@ -34,6 +34,13 @@ func NewSQLRunner(opts ...SQLOption) *SQLEngine {
 	return e
 }
 
+// SetTaskIDProvider overrides the ID derivation strategy for tasks parsed by the SQL engine.
+func (e *SQLEngine) SetTaskIDProvider(provider TaskIDProvider) {
+	if e.BaseEngine != nil {
+		e.BaseEngine.SetTaskIDProvider(provider)
+	}
+}
+
 func (e *SQLEngine) Execute(ctx context.Context, msg *ExecutionMessage) error {
 	scriptContent, err := e.GetScriptContent(msg)
 	if err != nil {
