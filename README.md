@@ -287,7 +287,11 @@ func main() {
 
     // Create database source provider
     // Expects a table with columns: path (string), content (bytea/text)
+    // Defaults to PostgreSQL-style placeholders ($1, $2, ...)
     dbProvider := job.NewDBSourceProvider(db, "scripts")
+
+    // Override placeholder style for drivers that use '?' (e.g. SQLite/MySQL)
+    // dbProvider.WithPlaceholder(job.SQLQuestionPlaceholder)
 
     // Create task creator with database provider
     taskCreator := job.NewTaskCreator(
