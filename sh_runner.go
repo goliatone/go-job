@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
+	"time"
 
 	"github.com/goliatone/go-errors"
 )
@@ -49,6 +51,14 @@ func (e *ShellEngine) Execute(ctx context.Context, msg *ExecutionMessage) error 
 	execCtx, cancel := e.GetExecutionContext(ctx)
 	defer cancel()
 
+	logger := e.logger
+	if fl, ok := logger.(FieldsLogger); ok {
+		logger = fl.WithFields(map[string]any{
+			"engine":      e.EngineType,
+			"script_path": msg.ScriptPath,
+		})
+	}
+
 	cmd := exec.CommandContext(execCtx, e.shell, append(e.shellArgs, scriptContent)...)
 
 	if e.workDir != "" {
@@ -74,17 +84,12 @@ func (e *ShellEngine) Execute(ctx context.Context, msg *ExecutionMessage) error 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	// Create a map for detailed error info
-	// resultDetails := map[string]any{
-	// 	"stdout": stdout.String(),
-	// 	"stderr": stderr.String(),
-	// }
-
-	e.logger.Info("=== EXECUTE SH ====")
-	e.logger.Info(msg.ScriptPath)
+	logger.Debug("shell command starting", "script_path", msg.ScriptPath)
+	start := time.Now()
 
 	if err := cmd.Run(); err != nil {
-		e.logger.Info(stderr.String())
+		duration := time.Since(start)
+		logger.Error("shell command failed", "script_path", msg.ScriptPath, "duration", duration, "exit_code", getExitCode(err), "stderr", summarizeOutput(stderr.String()))
 		return errors.Wrap(err, errors.CategoryExternal, "script execution failed").
 			WithTextCode("SHELL_EXECUTION_ERROR").
 			WithMetadata(map[string]any{
@@ -94,13 +99,17 @@ func (e *ShellEngine) Execute(ctx context.Context, msg *ExecutionMessage) error 
 				"working_dir": e.workDir,
 				"stdout":      stdout.String(),
 				"stderr":      stderr.String(),
+				"duration":    duration,
 				"exit_code":   getExitCode(err),
 			})
 	}
 
-	e.logger.Info(stdout.String())
+	duration := time.Since(start)
+	stdoutSummary := summarizeOutput(stdout.String())
+	stderrSummary := summarizeOutput(stderr.String())
 
 	if exitCode := cmd.ProcessState.ExitCode(); exitCode != 0 {
+		logger.Warn("shell command exited with non-zero status", "script_path", msg.ScriptPath, "duration", duration, "exit_code", exitCode, "stdout", stdoutSummary, "stderr", stderrSummary)
 		return errors.New("script exited with non-zero status", errors.CategoryExternal).
 			WithTextCode("SHELL_EXECUTION_ERROR").
 			WithMetadata(map[string]any{
@@ -110,10 +119,12 @@ func (e *ShellEngine) Execute(ctx context.Context, msg *ExecutionMessage) error 
 				"working_dir": e.workDir,
 				"stdout":      stdout.String(),
 				"stderr":      stderr.String(),
+				"duration":    duration,
 				"exit_code":   exitCode,
 			})
 	}
 
+	logger.Info("shell command completed", "script_path", msg.ScriptPath, "duration", duration, "stdout", stdoutSummary, "stderr", stderrSummary)
 	return nil
 }
 
@@ -122,4 +133,12 @@ func getExitCode(err error) int {
 		return exitError.ExitCode()
 	}
 	return -1
+}
+
+func summarizeOutput(out string) string {
+	trimmed := strings.TrimSpace(out)
+	if len(trimmed) <= 256 {
+		return trimmed
+	}
+	return trimmed[:253] + "..."
 }
