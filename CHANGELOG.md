@@ -1,5 +1,25 @@
 # Changelog
 
+# [0.8.0](https://github.com/goliatone/go-job/compare/v0.7.0...v0.8.0) - (2025-10-27)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Error check ([b4ddb00](https://github.com/goliatone/go-job/commit/b4ddb005c1e61812e16eabf26f7f40e16fc45ea2))  - (goliatone)
+- Close file handlers ([934326a](https://github.com/goliatone/go-job/commit/934326a9816f7010c85cd6e08f44c99826ab672c))  - (goliatone)
+- Placeholder function to build sql queries ([f58c811](https://github.com/goliatone/go-job/commit/f58c81198ad760f0c75585c20d913e73fb73c19e))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.8.0 ([611106d](https://github.com/goliatone/go-job/commit/611106dd96349946e3b22b1800cbe37518b96eb9))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.7.0 ([9a29a37](https://github.com/goliatone/go-job/commit/9a29a3728ce7388d4758bd0b431c875a518545d3))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update docs ([24b7669](https://github.com/goliatone/go-job/commit/24b76691ec66009d4cd940d178033aa01d1e7c59))  - (goliatone)
+
 # [0.7.0](https://github.com/goliatone/go-job/compare/v0.6.0...v0.7.0) - (2025-10-27)
 
 ## <!-- 13 -->📦 Bumps
