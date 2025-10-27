@@ -84,6 +84,9 @@ func (e *BaseEngine) SetTaskIDProvider(provider TaskIDProvider) {
 // SetLogger replaces the engine logger, falling back to the default provider when nil.
 func (e *BaseEngine) SetLogger(logger Logger) {
 	if logger == nil {
+		if e.loggerProvider == nil {
+			e.loggerProvider = newStdLoggerProvider()
+		}
 		e.logger = e.loggerProvider.GetLogger("job:engine:" + e.EngineType)
 		return
 	}
