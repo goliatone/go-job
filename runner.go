@@ -13,15 +13,18 @@ type Runner struct {
 	errorHandler      func(Task, error)
 	taskCreators      []TaskCreator
 	logger            Logger
+	loggerProvider    LoggerProvider
 	taskIDProvider    TaskIDProvider
 	taskEventHandlers []TaskEventHandler
 }
 
 func NewRunner(opts ...Option) *Runner {
+	loggerProvider := newStdLoggerProvider()
 	rn := &Runner{
-		registry: NewMemoryRegistry(),
-		parser:   NewYAMLMetadataParser(),
-		logger:   &defaultLogger{},
+		registry:       NewMemoryRegistry(),
+		parser:         NewYAMLMetadataParser(),
+		loggerProvider: loggerProvider,
+		logger:         loggerProvider.GetLogger("job:runner"),
 	}
 
 	for _, opt := range opts {
@@ -33,10 +36,10 @@ func NewRunner(opts ...Option) *Runner {
 	if rn.errorHandler == nil {
 		rn.errorHandler = func(task Task, err error) {
 			if task != nil {
-				rn.logger.Error("job error", err, "id", task.GetID())
+				rn.logger.Error("task registration error", "task_id", task.GetID(), "error", err)
 				return
 			}
-			rn.logger.Error("job error", err)
+			rn.logger.Error("runner error", "error", err)
 		}
 	}
 
@@ -109,6 +112,28 @@ func (r *Runner) RegisteredTasks() []Task {
 }
 
 func (r *Runner) emitTaskEvent(event TaskEvent) {
+	if event.Type == "" {
+		event.Type = TaskEventRegistrationFailed
+	}
+
+	switch event.Type {
+	case TaskEventRegistered:
+		args := []any{
+			"task_id", event.TaskID,
+			"script_path", event.ScriptPath,
+		}
+		r.logger.Info("task registered", args...)
+	case TaskEventRegistrationFailed:
+		args := []any{
+			"task_id", event.TaskID,
+			"script_path", event.ScriptPath,
+		}
+		if event.Err != nil {
+			args = append(args, "error", event.Err)
+		}
+		r.logger.Warn("task registration failed", args...)
+	}
+
 	for _, handler := range r.taskEventHandlers {
 		handler(event)
 	}
@@ -118,6 +143,7 @@ func (r *Runner) handleContextCancellation(err error) {
 	if err == nil {
 		return
 	}
+	r.logger.Warn("task discovery cancelled", "error", err)
 	r.errorHandler(nil, err)
 	r.emitTaskEvent(TaskEvent{
 		Type: TaskEventRegistrationFailed,
@@ -128,6 +154,15 @@ func (r *Runner) handleContextCancellation(err error) {
 func (r *Runner) attachTaskCreatorOptions(creator TaskCreator) {
 	if creator == nil {
 		return
+	}
+
+	if r.loggerProvider != nil {
+		switch tc := creator.(type) {
+		case LoggerProviderAware:
+			tc.SetLoggerProvider(r.loggerProvider)
+		case LoggerAware:
+			tc.SetLogger(r.loggerProvider.GetLogger("job:task_creator"))
+		}
 	}
 
 	if r.taskIDProvider != nil {
@@ -163,6 +198,21 @@ func (r *Runner) propagateTaskIDProvider() {
 	for _, creator := range r.taskCreators {
 		if consumer, ok := creator.(TaskIDProviderAware); ok {
 			consumer.SetTaskIDProvider(r.taskIDProvider)
+		}
+	}
+}
+
+func (r *Runner) propagateLoggerProvider() {
+	if r.loggerProvider == nil {
+		return
+	}
+
+	r.logger = r.loggerProvider.GetLogger("job:runner")
+
+	for _, creator := range r.taskCreators {
+		switch tc := creator.(type) {
+		case LoggerProviderAware:
+			tc.SetLoggerProvider(r.loggerProvider)
 		}
 	}
 }
