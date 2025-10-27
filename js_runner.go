@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/dop251/goja"
 	"github.com/dop251/goja_nodejs/buffer"
@@ -57,10 +58,31 @@ func (e *JSEngine) Execute(ctx context.Context, msg *ExecutionMessage) error {
 		"scriptPath": msg.ScriptPath,
 	})
 
+	logger := e.logger
+	if fl, ok := logger.(FieldsLogger); ok {
+		logger = fl.WithFields(map[string]any{
+			"engine":      e.EngineType,
+			"script_path": msg.ScriptPath,
+		})
+	}
+
 	scriptContent, err := e.GetScriptContent(msg)
 	if err != nil {
+		logger.Error("js script failed", "script_path", msg.ScriptPath, "error", err)
 		return err
 	}
+
+	logger.Debug("js script starting", "script_path", msg.ScriptPath)
+	start := time.Now()
+	var execErr error
+	defer func() {
+		duration := time.Since(start)
+		if execErr != nil {
+			logger.Error("js script failed", "script_path", msg.ScriptPath, "duration", duration, "error", execErr)
+		} else {
+			logger.Info("js script completed", "script_path", msg.ScriptPath, "duration", duration)
+		}
+	}()
 
 	execCtx, cancel := e.GetExecutionContext(ctx)
 	defer cancel()
@@ -100,23 +122,25 @@ func (e *JSEngine) Execute(ctx context.Context, msg *ExecutionMessage) error {
 	})
 
 	if !ok {
-		return errors.New("loop was terminated before configuration", errors.CategoryInternal).
+		execErr = errors.New("loop was terminated before configuration", errors.CategoryInternal).
 			WithTextCode("JS_LOOP_TERMINATED").
 			WithMetadata(map[string]any{
 				"operation":   "configure_loop",
 				"script_path": msg.ScriptPath,
 				"phase":       "pre_configuration",
 			})
+		return execErr
 	}
 
 	if err := <-configErrCh; err != nil {
 		loop.Terminate()
-		return errors.Wrap(err, errors.CategoryInternal, "failed to configure the VM environment").
+		execErr = errors.Wrap(err, errors.CategoryInternal, "failed to configure the VM environment").
 			WithTextCode("JS_VM_CONFIG_ERROR").
 			WithMetadata(map[string]any{
 				"operation":   "configure_vm",
 				"script_path": msg.ScriptPath,
 			})
+		return execErr
 	}
 
 	execErrCh := make(chan error, 1)
@@ -126,36 +150,40 @@ func (e *JSEngine) Execute(ctx context.Context, msg *ExecutionMessage) error {
 	})
 
 	if !ok {
-		return errors.New("loop was terminated before running script", errors.CategoryInternal).
+		execErr = errors.New("loop was terminated before running script", errors.CategoryInternal).
 			WithTextCode("JS_LOOP_TERMINATED").
 			WithMetadata(map[string]any{
 				"operation":   "execute_script",
 				"script_path": msg.ScriptPath,
 				"phase":       "pre_execution",
 			})
+		return execErr
 	}
 
 	select {
 	case err := <-execErrCh:
 		loop.Stop()
 		if err != nil {
-			return errors.Wrap(err, errors.CategoryInternal, "script execution failed").
+			execErr = errors.Wrap(err, errors.CategoryInternal, "script execution failed").
 				WithTextCode("JS_EXECUTION_ERROR").
 				WithMetadata(map[string]any{
 					"operation":   "run_script",
 					"script_path": msg.ScriptPath,
 				})
+			return execErr
 		}
+		execErr = nil
 		return nil
 	case <-execCtx.Done():
 		loop.Terminate()
-		return errors.Wrap(execCtx.Err(), errors.CategoryExternal, "script execution timed out").
+		execErr = errors.Wrap(execCtx.Err(), errors.CategoryExternal, "script execution timed out").
 			WithTextCode("JS_EXECUTION_TIMEOUT").
 			WithMetadata(map[string]any{
 				"operation":   "execute_script",
 				"script_path": msg.ScriptPath,
 				"timeout":     "context_deadline",
 			})
+		return execErr
 	}
 }
 
