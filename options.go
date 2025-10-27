@@ -29,7 +29,25 @@ func WithMetadataParser(parser MetadataParser) Option {
 func WithTaskCreator(creator TaskCreator) Option {
 	return func(r *Runner) {
 		if creator != nil {
+			r.attachTaskCreatorOptions(creator)
 			r.taskCreators = append(r.taskCreators, creator)
 		}
+	}
+}
+
+func WithTaskIDProvider(provider TaskIDProvider) Option {
+	return func(r *Runner) {
+		r.taskIDProvider = provider
+		r.propagateTaskIDProvider()
+	}
+}
+
+func WithTaskEventHandler(handler TaskEventHandler) Option {
+	return func(r *Runner) {
+		if handler == nil {
+			return
+		}
+		r.taskEventHandlers = append(r.taskEventHandlers, handler)
+		r.propagateTaskEventHandler(handler)
 	}
 }
