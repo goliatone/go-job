@@ -16,6 +16,7 @@ func NewTaskCreator(provider SourceProvider, engines []Engine) *taskCreator {
 	tc := &taskCreator{
 		sourceProvider: provider,
 		engines:        engines,
+		logger:         &defaultLogger{},
 	}
 
 	tc.errorHandler = func(task Task, err error) {
