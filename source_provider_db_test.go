@@ -53,7 +53,7 @@ func TestNewDBSourceProvider(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	provider := job.NewDBSourceProvider(db, "scripts")
+	provider := job.NewDBSourceProvider(db, "scripts").WithPlaceholder(job.SQLQuestionPlaceholder)
 
 	if provider.DB != db {
 		t.Error("Expected db to be set correctly")
@@ -68,7 +68,7 @@ func TestDBSourceProvider_GetScript(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	provider := job.NewDBSourceProvider(db, "scripts")
+	provider := job.NewDBSourceProvider(db, "scripts").WithPlaceholder(job.SQLQuestionPlaceholder)
 
 	// Test data
 	testCases := []struct {
@@ -146,7 +146,7 @@ func TestDBSourceProvider_GetScript_PathCleaning(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	provider := job.NewDBSourceProvider(db, "scripts")
+	provider := job.NewDBSourceProvider(db, "scripts").WithPlaceholder(job.SQLQuestionPlaceholder)
 
 	// Insert script with clean path
 	cleanPath := "clean/path.sql"
@@ -180,7 +180,7 @@ func TestDBSourceProvider_ListScripts(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	provider := job.NewDBSourceProvider(db, "scripts")
+	provider := job.NewDBSourceProvider(db, "scripts").WithPlaceholder(job.SQLQuestionPlaceholder)
 
 	// Test empty table
 	t.Run("empty table", func(t *testing.T) {

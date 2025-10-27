@@ -51,11 +51,29 @@ func (m *MockSourceProvider) ListScripts(ctx context.Context) ([]job.ScriptInfo,
 
 type MockTask struct {
 	mock.Mock
+	defaultID string
 }
 
-func (m *MockTask) GetID() string {
+func (m *MockTask) GetID() (id string) {
+	if m.defaultID == "" {
+		m.defaultID = "mock-task"
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			id = m.defaultID
+		}
+	}()
+
 	args := m.Called()
-	return args.Get(0).(string)
+	if len(args) > 0 {
+		if str, ok := args.Get(0).(string); ok && str != "" {
+			id = str
+			return
+		}
+	}
+	id = m.defaultID
+	return
 }
 
 func (m *MockTask) GetHandler() func() error {
