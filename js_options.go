@@ -70,7 +70,7 @@ func WithJSPanicHandler(handler func(funcName string, fields ...map[string]any))
 func WithJSLogger(logger Logger) JSOption {
 	return func(se *JSEngine) {
 		if logger != nil {
-			se.logger = logger
+			se.SetLogger(logger)
 		}
 	}
 }
