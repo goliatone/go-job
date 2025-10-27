@@ -21,10 +21,12 @@ type BaseEngine struct {
 	EngineType     string
 	Self           Engine
 	logger         Logger
+	loggerProvider LoggerProvider
 	taskIDProvider TaskIDProvider
 }
 
 func NewBaseEngine(self Engine, engingeType string, exts ...string) *BaseEngine {
+	provider := newStdLoggerProvider()
 	return &BaseEngine{
 		Timeout:        30 * time.Second,
 		MetadataParser: NewYAMLMetadataParser(),
@@ -32,7 +34,8 @@ func NewBaseEngine(self Engine, engingeType string, exts ...string) *BaseEngine 
 		EngineType:     engingeType,
 		FileExtensions: exts,
 		Self:           self,
-		logger:         &defaultLogger{},
+		loggerProvider: provider,
+		logger:         provider.GetLogger("job:engine:" + engingeType),
 		taskIDProvider: DefaultTaskIDProvider,
 	}
 }
@@ -67,12 +70,53 @@ func (e *BaseEngine) ParseJob(path string, content []byte) (Task, error) {
 	}
 	jobID := provider(path)
 	job := NewBaseTask(jobID, path, e.EngineType, config, scriptContent, e.Self)
+	if bt, ok := job.(*baseTask); ok {
+		bt.logger = e.taskLogger(path)
+	}
 	return job, nil
 }
 
 // SetTaskIDProvider allows engines to override the default ID generation strategy.
 func (e *BaseEngine) SetTaskIDProvider(provider TaskIDProvider) {
 	e.taskIDProvider = provider
+}
+
+// SetLogger replaces the engine logger, falling back to the default provider when nil.
+func (e *BaseEngine) SetLogger(logger Logger) {
+	if logger == nil {
+		e.logger = e.loggerProvider.GetLogger("job:engine:" + e.EngineType)
+		return
+	}
+	e.logger = logger
+}
+
+// SetLoggerProvider swaps the underlying logger provider used by the engine.
+func (e *BaseEngine) SetLoggerProvider(provider LoggerProvider) {
+	if provider == nil {
+		provider = newStdLoggerProvider()
+	}
+	e.loggerProvider = provider
+	e.logger = provider.GetLogger("job:engine:" + e.EngineType)
+}
+
+func (e *BaseEngine) taskLogger(scriptPath string) Logger {
+	logger := e.logger
+	if logger == nil {
+		if e.loggerProvider != nil {
+			logger = e.loggerProvider.GetLogger("job:engine:" + e.EngineType)
+		} else {
+			logger = newStdLoggerProvider().GetLogger("job:engine:" + e.EngineType)
+		}
+	}
+
+	if fl, ok := logger.(FieldsLogger); ok {
+		return fl.WithFields(map[string]any{
+			"engine":      e.EngineType,
+			"script_path": scriptPath,
+		})
+	}
+
+	return logger
 }
 
 func (e *BaseEngine) GetScriptContent(msg *ExecutionMessage) (string, error) {
