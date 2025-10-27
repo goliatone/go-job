@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 var _ SourceProvider = &FileSystemSourceProvider{}
@@ -53,7 +54,7 @@ func (p *FileSystemSourceProvider) GetScript(path string) ([]byte, error) {
 	}
 
 	content := make([]byte, info.Size())
-	if _, err := file.Read(content); err != nil {
+	if _, err := io.ReadFull(file, content); err != nil {
 		return nil, fmt.Errorf("failed to read file %s: %w", path, err)
 	}
 
@@ -97,10 +98,24 @@ func (p *FileSystemSourceProvider) ListScripts(ctx context.Context) ([]ScriptInf
 			Content: content,
 		})
 
+		runtime.Gosched()
+
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+
 		return nil
 	})
 
-	return scripts, err
+	if err != nil {
+		return nil, err
+	}
+
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+
+	return scripts, nil
 }
 
 func (p *FileSystemSourceProvider) loadScriptContent(ctx context.Context, path string) ([]byte, error) {
@@ -113,6 +128,11 @@ func (p *FileSystemSourceProvider) loadScriptContent(ctx context.Context, path s
 		return nil, fmt.Errorf("failed to read file %s: %w", path, err)
 	}
 
+	if err := ctx.Err(); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+
 	content, readErr := p.readFile(ctx, path, file)
 	closeErr := file.Close()
 
@@ -121,6 +141,10 @@ func (p *FileSystemSourceProvider) loadScriptContent(ctx context.Context, path s
 	}
 	if closeErr != nil {
 		return nil, fmt.Errorf("failed to close file %s: %w", path, closeErr)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	return content, nil
