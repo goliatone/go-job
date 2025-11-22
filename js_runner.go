@@ -108,7 +108,7 @@ func (e *JSEngine) Execute(ctx context.Context, msg *ExecutionMessage) error {
 		buffer.Enable(vm)
 		console.Enable(vm)
 
-		if ferr := e.setupFetch(vm); ferr != nil {
+		if ferr := e.setupFetch(execCtx, vm); ferr != nil {
 			configErrCh <- ferr
 			return
 		}
