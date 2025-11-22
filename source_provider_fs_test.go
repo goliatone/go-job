@@ -90,6 +90,22 @@ func TestFileSystemSourceProviderMaxFileSizeGuard(t *testing.T) {
 	assert.Nil(t, scripts)
 }
 
+func TestFileSystemSourceProviderIgnoreGlobsAndPaths(t *testing.T) {
+	provider := job.NewFileSystemSourceProvider(".", fstest.MapFS{
+		"keep/a.js":   {Data: []byte("console.log('a')")},
+		"ignore.db":   {Data: []byte("db file")},
+		"ignore/b.sh": {Data: []byte("echo b")},
+	})
+
+	provider.WithIgnoreGlobs("*.db")
+	provider.WithIgnorePaths("ignore")
+
+	scripts, err := provider.ListScripts(context.Background())
+	require.NoError(t, err)
+	require.Len(t, scripts, 1)
+	assert.Equal(t, "keep/a.js", scripts[0].Path)
+}
+
 type instrumentedFS struct {
 	data   fstest.MapFS
 	onOpen func(string)
