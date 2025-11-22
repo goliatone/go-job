@@ -203,9 +203,12 @@ type rawConfig struct {
 	Schedule    string            `yaml:"schedule"`
 	Retries     int               `yaml:"retries"`
 	Timeout     string            `yaml:"timeout"`
+	Deadline    string            `yaml:"deadline"`
 	NoTimeout   bool              `yaml:"no_timeout"`
 	Debug       bool              `yaml:"debug"`
 	RunOnce     bool              `yaml:"run_once"`
+	MaxRuns     int               `yaml:"max_runs"`
+	ExitOnError bool              `yaml:"exit_on_error"`
 	Env         map[string]string `yaml:"env"`
 	ScriptType  string            `yaml:"script_type"`
 	Transaction bool              `yaml:"transaction"`
@@ -224,6 +227,8 @@ func parseRawConfig(data []byte) (Config, error) {
 		NoTimeout:   raw.NoTimeout,
 		Debug:       raw.Debug,
 		RunOnce:     raw.RunOnce,
+		MaxRuns:     raw.MaxRuns,
+		ExitOnError: raw.ExitOnError,
 		ScriptType:  raw.ScriptType,
 		Transaction: raw.Transaction,
 		Metadata:    raw.Metadata,
@@ -253,6 +258,15 @@ func parseRawConfig(data []byte) (Config, error) {
 
 	if cfg.Schedule == "" {
 		cfg.Schedule = DefaultSchedule
+	}
+
+	if raw.Deadline != "" {
+		d, err := time.Parse(time.RFC3339, raw.Deadline)
+		if err != nil {
+			errs = errors.Join(errs, errors.New(fmt.Sprintf("invalid deadline: %s", raw.Deadline)))
+		} else {
+			cfg.Deadline = d
+		}
 	}
 
 	return cfg, errs
