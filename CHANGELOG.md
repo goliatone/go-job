@@ -1,5 +1,38 @@
 # Changelog
 
+# [0.9.0](https://github.com/goliatone/go-job/compare/v0.8.0...v0.9.0) - (2025-11-22)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Error messsage and handler ([dc21313](https://github.com/goliatone/go-job/commit/dc21313300df348aae4c3c769937f58410090fba))  - (goliatone)
+- Secure db handling ([0bb67f0](https://github.com/goliatone/go-job/commit/0bb67f082585b1716f4c08564e46bcfba58766f8))  - (goliatone)
+- Parsing yaml ([24272e0](https://github.com/goliatone/go-job/commit/24272e0a0881f4b2b7a0faeec3725b2b12384dda))  - (goliatone)
+- Leak ctx in fetch ([53fd34f](https://github.com/goliatone/go-job/commit/53fd34f9dfc8db88103aafd2f231f69df430a5cb))  - (goliatone)
+- Context handling ([aca03ed](https://github.com/goliatone/go-job/commit/aca03ed2415046d8ad52d30f1d816ec6934e25cf))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.9.0 ([17e180a](https://github.com/goliatone/go-job/commit/17e180af8ace22a62b10ed2ac45eb94bf49b3f95))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Persistence options ([500fe85](https://github.com/goliatone/go-job/commit/500fe85cff8ac842e1ab5c837d78ccdfd893f6e7))  - (goliatone)
+- New handler options ([8f3da9e](https://github.com/goliatone/go-job/commit/8f3da9e43d70bbf734bf6aa732502e0af330c4fa))  - (goliatone)
+- Base task implement commander interface ([15569c7](https://github.com/goliatone/go-job/commit/15569c71523473b94a5af44750b9bbb24292d78b))  - (goliatone)
+- Handler options ([a6c1870](https://github.com/goliatone/go-job/commit/a6c1870ec410ad3208c5a5ce3a31eafbd2bee45a))  - (goliatone)
+- Task commander ([9b509b8](https://github.com/goliatone/go-job/commit/9b509b817ca76d577665de39d87828c77a08ecc8))  - (goliatone)
+- Config merge ([6eef942](https://github.com/goliatone/go-job/commit/6eef942e2ed645a4d738d549dd308e58a21795a7))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.8.0 ([1effba1](https://github.com/goliatone/go-job/commit/1effba1296dd752281813c3405fc7e54658d4b95))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update tests ([2767230](https://github.com/goliatone/go-job/commit/2767230b4721b82fa78c67dd30a6387b08a34bb4))  - (goliatone)
+- Update example ([0d683f2](https://github.com/goliatone/go-job/commit/0d683f2b157ccd8c2cbcfca8c0d8c8ba9cda72e0))  - (goliatone)
+- Update readme ([602735e](https://github.com/goliatone/go-job/commit/602735ed2fc2b2a7dfa03b2f66fe1962b35f9f2d))  - (goliatone)
+
 # [0.8.0](https://github.com/goliatone/go-job/compare/v0.7.0...v0.8.0) - (2025-10-27)
 
 ## <!-- 1 -->🐛 Bug Fixes
