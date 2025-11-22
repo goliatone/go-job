@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -49,6 +50,7 @@ func main() {
 	// Determine which engines to enable based on environment
 	var engines []job.Engine
 	sourceDir := "./data"
+	fsProvider := job.NewFileSystemSourceProvider(sourceDir).WithIgnoreGlobs("*.db")
 
 	// Always enable Shell and JavaScript engines
 	engines = append(engines,
@@ -85,7 +87,7 @@ func main() {
 	))
 
 	fsCreator := job.NewTaskCreator(
-		job.NewFileSystemSourceProvider(sourceDir),
+		fsProvider,
 		engines,
 	)
 
@@ -185,6 +187,13 @@ func main() {
 }
 
 func ensureSQLiteDemo(ctx context.Context, logger glog.Logger, dsn string) error {
+	dbPath := "data/example.db"
+	if dir := filepath.Dir(dbPath); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create sqlite demo dir: %w", err)
+		}
+	}
+
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return fmt.Errorf("open sqlite demo: %w", err)
