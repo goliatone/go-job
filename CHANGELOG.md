@@ -1,5 +1,19 @@
 # Changelog
 
+# [0.10.0](https://github.com/goliatone/go-job/compare/v0.9.0...v0.10.0) - (2025-11-22)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.10.0 ([fa20b0a](https://github.com/goliatone/go-job/commit/fa20b0a09823bb54aab1d5d8506b6569e7fe7e3c))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Command adapter ([b42597e](https://github.com/goliatone/go-job/commit/b42597ed3cb8767f4d25025b0e58928f36e6aad6))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.9.0 ([9f3fcbc](https://github.com/goliatone/go-job/commit/9f3fcbcc0a816dc0a7b7120a479cafb5371fba89))  - (goliatone)
+
 # [0.9.0](https://github.com/goliatone/go-job/compare/v0.8.0...v0.9.0) - (2025-11-22)
 
 ## <!-- 1 -->🐛 Bug Fixes
