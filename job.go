@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/goliatone/go-command"
 	"github.com/goliatone/go-errors"
 )
 
@@ -70,8 +69,11 @@ type Task interface {
 	GetID() string
 	// GetHandler is the function that we a command needs to implement in order to be able to execute it in the background
 	GetHandler() func() error
-	GetHandlerConfig() command.HandlerConfig
+	GetHandlerConfig() HandlerOptions
 	GetConfig() Config
+	GetPath() string
+	GetEngine() Engine
+	Execute(ctx context.Context, msg *ExecutionMessage) error
 }
 
 type Engine interface {
@@ -106,9 +108,12 @@ type Config struct {
 	Schedule    string            `yaml:"schedule" json:"schedule"`
 	Retries     int               `yaml:"retries" json:"retries"`
 	Timeout     time.Duration     `yaml:"duration" json:"duration"`
+	Deadline    time.Time         `yaml:"deadline" json:"deadline"`
 	NoTimeout   bool              `yaml:"no_timeout" json:"no_timeout"`
 	Debug       bool              `yaml:"debug" json:"debug"`
 	RunOnce     bool              `yaml:"run_once" json:"run_once"`
+	MaxRuns     int               `yaml:"max_runs" json:"max_runs"`
+	ExitOnError bool              `yaml:"exit_on_error" json:"exit_on_error"`
 	ScriptType  string            `yaml:"script_type" json:"script_type"`
 	Transaction bool              `yaml:"transaction" json:"transaction"`
 	Metadata    map[string]any    `yaml:"metadata" json:"metadata"`
