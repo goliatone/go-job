@@ -82,11 +82,22 @@ func (b *jsBody) arrayBuffer() func() *goja.Promise {
 	}
 }
 
-func (e *JSEngine) setupFetch(vm *goja.Runtime) error {
-	return SetupFetch(vm)
+func (e *JSEngine) setupFetch(ctx context.Context, vm *goja.Runtime) error {
+	return SetupFetchWithContext(ctx, vm)
 }
 
+// SetupFetch preserves the previous public API and wires fetch to a background context.
 func SetupFetch(vm *goja.Runtime) error {
+	return SetupFetchWithContext(context.Background(), vm)
+}
+
+// SetupFetchWithContext binds a fetch implementation to the provided context so requests
+// are cancelled when the parent execution context is done.
+func SetupFetchWithContext(ctx context.Context, vm *goja.Runtime) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	return vm.Set("fetch", func(call goja.FunctionCall) goja.Value {
 		promise, resolve, reject := vm.NewPromise()
 
@@ -179,7 +190,7 @@ func SetupFetch(vm *goja.Runtime) error {
 		}
 
 		go func() {
-			resp, err := executeFetch(urlStr, options)
+			resp, err := executeFetch(ctx, urlStr, options)
 			if err != nil {
 				reject(vm.NewGoError(err))
 				return
@@ -192,9 +203,13 @@ func SetupFetch(vm *goja.Runtime) error {
 	})
 }
 
-func executeFetch(url string, options FetchOptions) (*FetchResponse, error) {
-	ctx, cancel := context.WithTimeout(
-		context.Background(),
+func executeFetch(ctx context.Context, url string, options FetchOptions) (*FetchResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	reqCtx, cancel := context.WithTimeout(
+		ctx,
 		time.Duration(options.Timeout)*time.Millisecond,
 	)
 	defer cancel()
@@ -225,7 +240,7 @@ func executeFetch(url string, options FetchOptions) (*FetchResponse, error) {
 
 	}
 
-	req, err := http.NewRequestWithContext(ctx, options.Method, url, reqBody)
+	req, err := http.NewRequestWithContext(reqCtx, options.Method, url, reqBody)
 	if err != nil {
 		return nil, errors.Wrap(err, errors.CategoryBadInput, "failed to create request").
 			WithTextCode("FETCH_REQUEST_ERROR").
