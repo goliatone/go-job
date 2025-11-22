@@ -127,7 +127,7 @@ func main() {
 
     // Register tasks with the scheduler
     for _, task := range tasks {
-        _, err := scheduler.AddHandler(task.GetHandlerConfig(), task.GetHandler())
+        _, err := scheduler.AddHandler(task.GetHandlerConfig().ToCommandConfig(), task.GetHandler())
         if err != nil {
             log.Printf("Failed to register task %s: %v\n", task.GetID(), err)
             continue
