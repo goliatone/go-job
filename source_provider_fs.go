@@ -15,9 +15,10 @@ import (
 var _ SourceProvider = &FileSystemSourceProvider{}
 
 type FileSystemSourceProvider struct {
-	rootDir     string
-	fs          fs.FS
-	maxFileSize int64
+	rootDir        string
+	fs             fs.FS
+	maxFileSize    int64
+	ignoreMatchers []func(string, fs.DirEntry) bool
 }
 
 func NewFileSystemSourceProvider(rootDir string, fss ...fs.FS) *FileSystemSourceProvider {
@@ -35,6 +36,35 @@ var ErrScriptTooLarge = errors.New("script exceeds maximum size limit")
 
 func (p *FileSystemSourceProvider) WithMaxFileSize(limit int64) *FileSystemSourceProvider {
 	p.maxFileSize = limit
+	return p
+}
+
+// WithIgnoreGlobs skips files or directories matching any glob pattern (filepath.Match semantics).
+// Patterns are matched against paths relative to rootDir, using "/" separators.
+func (p *FileSystemSourceProvider) WithIgnoreGlobs(patterns ...string) *FileSystemSourceProvider {
+	for _, pat := range patterns {
+		if pat == "" {
+			continue
+		}
+		p.ignoreMatchers = append(p.ignoreMatchers, func(path string, d fs.DirEntry) bool {
+			matched, _ := filepath.Match(pat, path)
+			return matched
+		})
+	}
+	return p
+}
+
+// WithIgnorePaths skips exact relative paths (files or directories) during discovery.
+func (p *FileSystemSourceProvider) WithIgnorePaths(paths ...string) *FileSystemSourceProvider {
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		clean := filepath.Clean(path)
+		p.ignoreMatchers = append(p.ignoreMatchers, func(pth string, _ fs.DirEntry) bool {
+			return filepath.Clean(pth) == clean
+		})
+	}
 	return p
 }
 
@@ -74,6 +104,13 @@ func (p *FileSystemSourceProvider) ListScripts(ctx context.Context) ([]ScriptInf
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
+		}
+
+		if p.shouldIgnore(path, d) {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
 		}
 
 		if d.IsDir() {
@@ -193,4 +230,13 @@ func (p *FileSystemSourceProvider) readFile(ctx context.Context, path string, fi
 	}
 
 	return buf.Bytes(), nil
+}
+
+func (p *FileSystemSourceProvider) shouldIgnore(path string, d fs.DirEntry) bool {
+	for _, matcher := range p.ignoreMatchers {
+		if matcher != nil && matcher(path, d) {
+			return true
+		}
+	}
+	return false
 }
