@@ -123,8 +123,10 @@ func (e *BaseEngine) taskLogger(scriptPath string) Logger {
 }
 
 func (e *BaseEngine) GetScriptContent(msg *ExecutionMessage) (string, error) {
-	if content, ok := msg.Parameters["script"].(string); ok {
-		return content, nil
+	if msg.Parameters != nil {
+		if content, ok := msg.Parameters["script"].(string); ok {
+			return content, nil
+		}
 	}
 
 	if e.SourceProvider == nil {
@@ -157,14 +159,24 @@ func (e *BaseEngine) GetScriptContent(msg *ExecutionMessage) (string, error) {
 }
 
 func (e *BaseEngine) GetExecutionTimeout(ctx context.Context) time.Duration {
-	execTimeout := e.Timeout
-	if deadline, ok := ctx.Deadline(); ok {
-		execTimeout = time.Until(deadline)
+	if ctx == nil {
+		return e.Timeout
 	}
-	return execTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		return time.Until(deadline)
+	}
+	return e.Timeout
 }
 
 func (e *BaseEngine) GetExecutionContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if _, ok := ctx.Deadline(); ok {
+		return context.WithCancel(ctx)
+	}
+
 	execTimeout := e.GetExecutionTimeout(ctx)
 	return context.WithTimeout(ctx, execTimeout)
 }
