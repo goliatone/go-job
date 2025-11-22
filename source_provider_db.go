@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"regexp"
 )
 
 var _ SourceProvider = &DBSourceProvider{}
@@ -24,12 +25,16 @@ func NewDBSourceProvider(db *sql.DB, table string) *DBSourceProvider {
 }
 
 func (p *DBSourceProvider) GetScript(path string) ([]byte, error) {
-
 	path = filepath.Clean(path)
 
-	query := fmt.Sprintf("SELECT content FROM %s WHERE path = %s LIMIT 1", p.Table, p.placeholderFor(1))
+	table, err := p.safeTable()
+	if err != nil {
+		return nil, err
+	}
+
+	query := fmt.Sprintf("SELECT content FROM %s WHERE path = %s LIMIT 1", table, p.placeholderFor(1))
 	var content []byte
-	err := p.DB.QueryRow(query, path).Scan(&content)
+	err = p.DB.QueryRow(query, path).Scan(&content)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("script not found at path %s", path)
@@ -43,7 +48,12 @@ func (p *DBSourceProvider) GetScript(path string) ([]byte, error) {
 func (p *DBSourceProvider) ListScripts(ctx context.Context) ([]ScriptInfo, error) {
 	var scripts []ScriptInfo
 
-	query := fmt.Sprintf("SELECT path, content FROM %s", p.Table)
+	table, err := p.safeTable()
+	if err != nil {
+		return nil, err
+	}
+
+	query := fmt.Sprintf("SELECT path, content FROM %s", table)
 
 	rows, err := p.DB.QueryContext(ctx, query)
 	if err != nil {
@@ -94,6 +104,20 @@ func (p *DBSourceProvider) placeholderFor(index int) string {
 		return defaultPostgresPlaceholder(index)
 	}
 	return p.placeholder(index)
+}
+
+func (p *DBSourceProvider) safeTable() (string, error) {
+	table := p.Table
+	if table == "" {
+		return "", fmt.Errorf("table name must be provided")
+	}
+
+	re := regexp.MustCompile(`^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$`)
+	if !re.MatchString(table) {
+		return "", fmt.Errorf("invalid table name %q", table)
+	}
+
+	return table, nil
 }
 
 func defaultPostgresPlaceholder(index int) string {
