@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goliatone/go-command"
 	"github.com/goliatone/go-job"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -82,14 +81,38 @@ func (m *MockTask) GetHandler() func() error {
 	}
 }
 
-func (m *MockTask) GetHandlerConfig() command.HandlerConfig {
+func (m *MockTask) GetHandlerConfig() job.HandlerOptions {
 	args := m.Called()
-	return args.Get(0).(command.HandlerConfig)
+	if len(args) == 0 {
+		return job.HandlerOptions{}
+	}
+	if cfg, ok := args.Get(0).(job.HandlerOptions); ok {
+		return cfg
+	}
+	return job.HandlerOptions{}
 }
 
 func (m *MockTask) GetConfig() job.Config {
 	args := m.Called()
-	return args.Get(0).(job.Config)
+	if len(args) == 0 {
+		return job.Config{}
+	}
+	if cfg, ok := args.Get(0).(job.Config); ok {
+		return cfg
+	}
+	return job.Config{}
+}
+
+func (m *MockTask) GetPath() string {
+	return "mock-path"
+}
+
+func (m *MockTask) GetEngine() job.Engine {
+	return nil
+}
+
+func (m *MockTask) Execute(_ context.Context, _ *job.ExecutionMessage) error {
+	return nil
 }
 
 func TestTaskCreator_WithErrorHandler(t *testing.T) {

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/goliatone/go-command"
 	"github.com/goliatone/go-job"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -40,12 +39,24 @@ func (s stubTask) GetHandler() func() error {
 	return func() error { return nil }
 }
 
-func (s stubTask) GetHandlerConfig() command.HandlerConfig {
-	return command.HandlerConfig{}
+func (s stubTask) GetHandlerConfig() job.HandlerOptions {
+	return job.HandlerOptions{}
 }
 
 func (s stubTask) GetConfig() job.Config {
 	return job.Config{}
+}
+
+func (s stubTask) GetPath() string {
+	return s.id
+}
+
+func (s stubTask) GetEngine() job.Engine {
+	return nil
+}
+
+func (s stubTask) Execute(_ context.Context, _ *job.ExecutionMessage) error {
+	return nil
 }
 
 type stubTaskCreator struct {
