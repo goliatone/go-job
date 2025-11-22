@@ -46,18 +46,15 @@ func (p *FileSystemSourceProvider) GetScript(path string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file %s: %w", path, err)
 	}
-	defer file.Close()
 
-	info, err := file.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("failed to stat file %s: %w", path, err)
+	content, readErr := p.readFile(context.Background(), path, file)
+	closeErr := file.Close()
+	if readErr != nil {
+		return nil, readErr
 	}
-
-	content := make([]byte, info.Size())
-	if _, err := io.ReadFull(file, content); err != nil {
-		return nil, fmt.Errorf("failed to read file %s: %w", path, err)
+	if closeErr != nil {
+		return nil, fmt.Errorf("failed to close file %s: %w", path, closeErr)
 	}
-
 	return content, nil
 }
 
