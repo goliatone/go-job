@@ -2,6 +2,7 @@ package job
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
 
@@ -109,6 +110,22 @@ func (r *Runner) Stop(_ context.Context) error {
 
 func (r *Runner) RegisteredTasks() []Task {
 	return r.registry.List()
+}
+
+// SetResult stores result metadata for a given job ID.
+func (r *Runner) SetResult(jobID string, result Result) error {
+	if r == nil || r.registry == nil {
+		return fmt.Errorf("runner registry not configured")
+	}
+	return r.registry.SetResult(jobID, result)
+}
+
+// GetResult retrieves result metadata for a given job ID.
+func (r *Runner) GetResult(jobID string) (Result, bool) {
+	if r == nil || r.registry == nil {
+		return Result{}, false
+	}
+	return r.registry.GetResult(jobID)
 }
 
 func (r *Runner) emitTaskEvent(event TaskEvent) {
