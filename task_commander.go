@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/goliatone/go-command/router"
+	"github.com/goliatone/go-errors"
 )
 
 type messageComposer interface {
@@ -59,6 +60,13 @@ func CompleteExecutionMessage(task Task, msg *ExecutionMessage) (*ExecutionMessa
 		return base, nil
 	}
 
+	if msg.IdempotencyKey != "" {
+		base.IdempotencyKey = msg.IdempotencyKey
+	}
+	if msg.DedupPolicy != "" {
+		base.DedupPolicy = msg.DedupPolicy
+	}
+
 	if msg.JobID != "" {
 		base.JobID = msg.JobID
 	}
@@ -76,22 +84,59 @@ func CompleteExecutionMessage(task Task, msg *ExecutionMessage) (*ExecutionMessa
 
 // TaskCommander adapts a Task to the command.Commander interface.
 type TaskCommander struct {
-	task Task
+	Task    Task
+	tracker *IdempotencyTracker
 }
 
 func NewTaskCommander(task Task) *TaskCommander {
-	return &TaskCommander{task: task}
+	return &TaskCommander{
+		Task:    task,
+		tracker: defaultIdempotencyTracker,
+	}
+}
+
+// WithIdempotencyTracker overrides the tracker used for deduplication checks.
+func (c *TaskCommander) WithIdempotencyTracker(tracker *IdempotencyTracker) *TaskCommander {
+	if c == nil {
+		return nil
+	}
+	c.tracker = tracker
+	return c
 }
 
 func (c *TaskCommander) Execute(ctx context.Context, msg *ExecutionMessage) error {
-	if c == nil || c.task == nil {
-		return fmt.Errorf("task commander has no task")
+	if msg == nil {
+		return errors.New("execution message required", errors.CategoryBadInput).
+			WithTextCode("JOB_EXEC_MSG_NIL")
 	}
-	finalMsg, err := CompleteExecutionMessage(c.task, msg)
+
+	if c == nil || c.Task == nil {
+		return errors.New("task not configured", errors.CategoryInternal).
+			WithTextCode("JOB_TASK_MISSING")
+	}
+
+	finalMsg, err := CompleteExecutionMessage(c.Task, msg)
 	if err != nil {
 		return err
 	}
-	return c.task.Execute(ctx, finalMsg)
+
+	if err := finalMsg.Validate(); err != nil {
+		return errors.Wrap(err, errors.CategoryBadInput, "invalid execution message").
+			WithTextCode("JOB_EXEC_MSG_INVALID")
+	}
+
+	decision, prevErr := dedupBeforeExecute(c.tracker, finalMsg)
+	switch decision {
+	case dedupDrop:
+		return ErrIdempotentDrop
+	case dedupMerge:
+		return prevErr
+	}
+
+	defer dedupAfterExecute(c.tracker, finalMsg, &err)
+
+	err = c.Task.Execute(ctx, finalMsg)
+	return err
 }
 
 // TaskCommandPattern builds a mux pattern for the task commander.
