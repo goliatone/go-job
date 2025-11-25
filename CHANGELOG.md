@@ -1,5 +1,42 @@
 # Changelog
 
+# [0.11.0](https://github.com/goliatone/go-job/compare/v0.10.0...v0.11.0) - (2025-11-25)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.11.0 ([f35694e](https://github.com/goliatone/go-job/commit/f35694e36c0e12538a21a54574ee56040c7431f9))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Authenticator ([aae5389](https://github.com/goliatone/go-job/commit/aae53899f8868dd7520489f1186f47ff371d79e2))  - (goliatone)
+- Cron manager ([a3b3e97](https://github.com/goliatone/go-job/commit/a3b3e97ea9abdbc9317379c2e5036efd5502a909))  - (goliatone)
+- Quotas manager ([c8706a0](https://github.com/goliatone/go-job/commit/c8706a002ebcee10e229bebdbb20547102f1fd43))  - (goliatone)
+- Concurrency manager ([200444d](https://github.com/goliatone/go-job/commit/200444d547ab2cf1fc04ce4be887d31d078ccece))  - (goliatone)
+- Result for tasks ([cb43bbd](https://github.com/goliatone/go-job/commit/cb43bbd07839fcea5a3f06501df34c760665b26f))  - (goliatone)
+- Retry manager ([27a46c8](https://github.com/goliatone/go-job/commit/27a46c8ba9953bd59db252ee0884490c66261a33))  - (goliatone)
+- Schedule sync command ([7567a4b](https://github.com/goliatone/go-job/commit/7567a4b0acc71a4710330ce5cce59a5a5d551230))  - (goliatone)
+- Test hooks ([5670714](https://github.com/goliatone/go-job/commit/5670714ca9e03d2640b9c0ac9e248594589865f3))  - (goliatone)
+- Quotas to commands ([b754aeb](https://github.com/goliatone/go-job/commit/b754aebd3eac3a4ac5e86bea6aa76fd5de4ed75c))  - (goliatone)
+- Runner set IDs for result ([43683b8](https://github.com/goliatone/go-job/commit/43683b8a6dfd216cbc4c7e93c0914a38a47bd63d))  - (goliatone)
+- Set/get registry ([ca537c7](https://github.com/goliatone/go-job/commit/ca537c7e5f60a5ed9a7df7a1b91fccac32dfa129))  - (goliatone)
+- Job definition use tags for json/yaml ([b523924](https://github.com/goliatone/go-job/commit/b5239246b80cbd1f52a19c56bb1b83b69aaf03b6))  - (goliatone)
+- Merge config ([34c9cf5](https://github.com/goliatone/go-job/commit/34c9cf5e3ef3e7b95c5b9ee47475e3bdad02da7a))  - (goliatone)
+- Task  commander refactoring ([3565de2](https://github.com/goliatone/go-job/commit/3565de2b1e41df6387aaccd8f413aff963e7a8e2))  - (goliatone)
+- Task commander refactoring ([4f1f1ed](https://github.com/goliatone/go-job/commit/4f1f1edc5c426113f38cbbdc2df81428719b7545))  - (goliatone)
+- Idempotency key ([151fbfb](https://github.com/goliatone/go-job/commit/151fbfb6f9ccd997a6f84fec7f02433c03e82b09))  - (goliatone)
+- Payload envelope ([4bf7d72](https://github.com/goliatone/go-job/commit/4bf7d72ed36c04474d643fdc9aa147c26098451e))  - (goliatone)
+- Idenpotency trackers ([9b0147d](https://github.com/goliatone/go-job/commit/9b0147d72954f894952dd8595acbde7645021f6d))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.10.0 ([2ed8764](https://github.com/goliatone/go-job/commit/2ed8764d618ad5649d9338ebe2bb12e157f37246))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Udpate readme ([62c044e](https://github.com/goliatone/go-job/commit/62c044e3dd9fc8f2bb71daf5d6417f9a66bc775f))  - (goliatone)
+- Update deps ([1caa023](https://github.com/goliatone/go-job/commit/1caa02356c27e8cc9d9f28cccf7f57e8a7429cc6))  - (goliatone)
+- Update tests ([ac53347](https://github.com/goliatone/go-job/commit/ac53347d6c45402be95763dcc0204e6c16d6d274))  - (goliatone)
+
 # [0.10.0](https://github.com/goliatone/go-job/compare/v0.9.0...v0.10.0) - (2025-11-22)
 
 ## <!-- 13 -->📦 Bumps
