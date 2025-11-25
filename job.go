@@ -29,6 +29,8 @@ type ExecutionMessage struct {
 	ScriptPath     string
 	Config         Config
 	Parameters     map[string]any
+	IdempotencyKey string
+	DedupPolicy    DeduplicationPolicy
 	OutputCallback func(stdout, stderr string)
 }
 
@@ -54,6 +56,22 @@ func (msg ExecutionMessage) Validate() error {
 			Field:   "script_path",
 			Message: "cannot be empty",
 			Value:   msg.ScriptPath,
+		})
+	}
+
+	if len(msg.IdempotencyKey) > MaxIdempotencyKeyLength {
+		fieldErrors = append(fieldErrors, errors.FieldError{
+			Field:   "idempotency_key",
+			Message: "exceeds maximum length",
+			Value:   msg.IdempotencyKey,
+		})
+	}
+
+	if !isValidDedupPolicy(msg.DedupPolicy) {
+		fieldErrors = append(fieldErrors, errors.FieldError{
+			Field:   "dedup_policy",
+			Message: "invalid policy; expected drop|merge|replace|ignore",
+			Value:   msg.DedupPolicy,
 		})
 	}
 
