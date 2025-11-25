@@ -6,13 +6,15 @@ import (
 )
 
 type memoryRegistry struct {
-	mx   sync.RWMutex
-	jobs map[string]Task
+	mx      sync.RWMutex
+	jobs    map[string]Task
+	results map[string]Result
 }
 
 func NewMemoryRegistry() *memoryRegistry {
 	return &memoryRegistry{
-		jobs: make(map[string]Task),
+		jobs:    make(map[string]Task),
+		results: make(map[string]Result),
 	}
 }
 
@@ -46,4 +48,21 @@ func (r *memoryRegistry) List() []Task {
 		jobs = append(jobs, job)
 	}
 	return jobs
+}
+
+func (r *memoryRegistry) SetResult(id string, result Result) error {
+	r.mx.Lock()
+	defer r.mx.Unlock()
+	if id == "" {
+		return fmt.Errorf("job id required")
+	}
+	r.results[id] = result
+	return nil
+}
+
+func (r *memoryRegistry) GetResult(id string) (Result, bool) {
+	r.mx.Lock()
+	defer r.mx.Unlock()
+	result, ok := r.results[id]
+	return result, ok
 }
