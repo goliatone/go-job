@@ -23,15 +23,16 @@ type TaskCreator interface {
 	CreateTasks(ctx context.Context) ([]Task, error)
 }
 
-// ExecutionMessage represents a request to execute a job script
+// ExecutionMessage represents a request to execute a job script.
 type ExecutionMessage struct {
-	JobID          string
-	ScriptPath     string
-	Config         Config
-	Parameters     map[string]any
-	IdempotencyKey string
-	DedupPolicy    DeduplicationPolicy
-	OutputCallback func(stdout, stderr string)
+	JobID          string                      `json:"job_id" yaml:"job_id"`
+	ScriptPath     string                      `json:"script_path" yaml:"script_path"`
+	Config         Config                      `json:"config" yaml:"config"`
+	Parameters     map[string]any              `json:"parameters" yaml:"parameters"`
+	IdempotencyKey string                      `json:"idempotency_key" yaml:"idempotency_key"`
+	DedupPolicy    DeduplicationPolicy         `json:"dedup_policy" yaml:"dedup_policy"`
+	Result         *Result                     `json:"result,omitempty" yaml:"result,omitempty"`
+	OutputCallback func(stdout, stderr string) `json:"-" yaml:"-"`
 }
 
 // Type returns the message type for the command system
@@ -75,6 +76,15 @@ func (msg ExecutionMessage) Validate() error {
 		})
 	}
 
+	if msg.Result != nil {
+		if err := msg.Result.Validate(); err != nil {
+			fieldErrors = append(fieldErrors, errors.FieldError{
+				Field:   "result",
+				Message: err.Error(),
+			})
+		}
+	}
+
 	if len(fieldErrors) > 0 {
 		return errors.NewValidation("execution message validation failed", fieldErrors...)
 	}
@@ -111,6 +121,8 @@ type Registry interface {
 	List() []Task
 	Add(job Task) error
 	Get(id string) (Task, bool)
+	SetResult(id string, result Result) error
+	GetResult(id string) (Result, bool)
 }
 
 type MetadataParser interface {
@@ -123,19 +135,21 @@ type MetadataParser interface {
 // MaxRuns    int           `json:"max_runs"`
 // RunOnce    bool          `json:"run_once"`
 type Config struct {
-	Schedule    string            `yaml:"schedule" json:"schedule"`
-	Retries     int               `yaml:"retries" json:"retries"`
-	Timeout     time.Duration     `yaml:"duration" json:"duration"`
-	Deadline    time.Time         `yaml:"deadline" json:"deadline"`
-	NoTimeout   bool              `yaml:"no_timeout" json:"no_timeout"`
-	Debug       bool              `yaml:"debug" json:"debug"`
-	RunOnce     bool              `yaml:"run_once" json:"run_once"`
-	MaxRuns     int               `yaml:"max_runs" json:"max_runs"`
-	ExitOnError bool              `yaml:"exit_on_error" json:"exit_on_error"`
-	ScriptType  string            `yaml:"script_type" json:"script_type"`
-	Transaction bool              `yaml:"transaction" json:"transaction"`
-	Metadata    map[string]any    `yaml:"metadata" json:"metadata"`
-	Env         map[string]string `yaml:"env" json:"env"`
+	Schedule       string            `yaml:"schedule" json:"schedule"`
+	Retries        int               `yaml:"retries" json:"retries"`
+	Timeout        time.Duration     `yaml:"duration" json:"duration"`
+	Deadline       time.Time         `yaml:"deadline" json:"deadline"`
+	NoTimeout      bool              `yaml:"no_timeout" json:"no_timeout"`
+	Debug          bool              `yaml:"debug" json:"debug"`
+	RunOnce        bool              `yaml:"run_once" json:"run_once"`
+	MaxRuns        int               `yaml:"max_runs" json:"max_runs"`
+	ExitOnError    bool              `yaml:"exit_on_error" json:"exit_on_error"`
+	ScriptType     string            `yaml:"script_type" json:"script_type"`
+	Transaction    bool              `yaml:"transaction" json:"transaction"`
+	Metadata       map[string]any    `yaml:"metadata" json:"metadata"`
+	Env            map[string]string `yaml:"env" json:"env"`
+	Backoff        BackoffConfig     `yaml:"backoff" json:"backoff"`
+	MaxConcurrency int               `yaml:"max_concurrency" json:"max_concurrency"`
 }
 
 var (
