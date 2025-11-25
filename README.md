@@ -150,6 +150,53 @@ func main() {
 }
 ```
 
+### Dispatching Tasks Through go-command
+
+`TaskCommander` lets you publish discovered tasks into a `go-command` router or dispatcher as `Commander[*job.ExecutionMessage]` handlers. Use the mux helper for flow/mux-driven dispatch and the dispatcher helper for bus-style dispatch.
+
+```go
+package main
+
+import (
+	"context"
+
+	"github.com/goliatone/go-command/dispatcher"
+	"github.com/goliatone/go-command/router"
+	"github.com/goliatone/go-job"
+)
+
+func main() {
+	taskCreator := job.NewTaskCreator(
+		job.NewFileSystemSourceProvider("./scripts"),
+		[]job.Engine{job.NewShellRunner()},
+	)
+
+	tasks, _ := taskCreator.CreateTasks(context.Background())
+
+	// Subscribe tasks to the mux (or dispatcher); keep the subscriptions to unsubscribe later.
+	mux := router.NewMux()
+	muxSubs := job.RegisterTasksWithMux(mux, tasks)
+	defer func() { for _, s := range muxSubs { s.Unsubscribe() } }()
+
+	dispatcherSubs := job.RegisterTasksWithDispatcher(tasks)
+	defer func() { for _, s := range dispatcherSubs { s.Unsubscribe() } }()
+
+	// Dispatch a message; TaskCommander will validate it and execute the task.
+	dispatcher.Dispatch(context.Background(), &job.ExecutionMessage{
+		JobID:      "my-script.sh",
+		ScriptPath: "./scripts/my-script.sh",
+	})
+
+	// Or look up the mux pattern directly for flow-style routing:
+	pattern := job.TaskCommandPattern(tasks[0])
+	for _, entry := range mux.Get(pattern) {
+		_ = entry.Handler.Execute(context.Background(), &job.ExecutionMessage{})
+	}
+}
+```
+
+Under the hood, `TaskCommander` wraps a `job.Task`, validates incoming `ExecutionMessage` payloads, and runs the task handler. Use this path when you need mux/dispatcher-driven execution instead of scheduler-driven execution.
+
 ### Basic Example (Manual Execution)
 
 ```go
@@ -366,6 +413,78 @@ func main() {
 
     fmt.Println("Script executed successfully")
 }
+```
+
+### Payload Envelope & Context
+
+Use `job.Envelope` to standardize payloads with actor/scope metadata and an optional idempotency key. Helpers enforce size limits and validation:
+
+```go
+env := job.Envelope{
+    Actor: &job.Actor{ID: "user-123", Role: "admin"},
+    Scope: job.Scope{TenantID: "acme"},
+    Params: map[string]any{"export_id": 42},
+    IdempotencyKey: "export-42",
+}
+
+payload, _ := job.EncodeEnvelope(env)      // JSON with size guard
+decoded, _ := job.DecodeEnvelope(payload)  // round-trips with validation
+```
+
+Optional go-auth adapter (build with `-tags goauth`) can attach/extract actor context:
+
+```go
+adapter := job.GoAuthAdapter{}
+env := adapter.AttachActor(ctx, job.Envelope{Params: params})
+ctx = adapter.InjectActor(ctx, env)
+```
+
+### Result Metadata
+
+Small execution results can be captured and stored via `job.Result` with size-guarded helpers:
+
+```go
+res := job.Result{Status: "success", Message: "done", Size: 512, Duration: time.Second}
+payload, _ := job.EncodeResult(res)          // JSON with max-size guard
+decoded, _ := job.DecodeResult(payload)
+runner.SetResult("job-id", decoded)          // persists in registry (memory by default)
+stored, _ := runner.GetResult("job-id")      // retrieve for UIs/history
+```
+
+#### Idempotency / Deduplication
+
+`ExecutionMessage` supports idempotency keys and dedup policies (`drop|merge|replace|ignore`) enforced by `TaskCommander`:
+
+```go
+cmd := job.NewTaskCommander(task)
+msg := &job.ExecutionMessage{
+    JobID:          task.GetID(),
+    ScriptPath:     task.GetPath(),
+    IdempotencyKey: "export-42",
+    DedupPolicy:    job.DedupPolicyDrop,
+}
+// second call with same key returns ErrIdempotentDrop when policy=drop
+_ = cmd.Execute(ctx, msg)
+```
+
+### Retry/Backoff Profiles
+
+Configure retries per job with fixed or exponential backoff and optional jitter:
+
+```go
+cfg := job.Config{
+    Retries: 2,
+    Backoff: job.BackoffConfig{
+        Strategy:    job.BackoffExponential,
+        Interval:    100 * time.Millisecond,
+        MaxInterval: time.Second,
+        Jitter:      true,
+    },
+}
+
+task := job.NewBaseTask("id", "/tmp/script.sh", "shell", cfg, "echo hi", engine)
+cmd := job.NewTaskCommander(task)
+_ = cmd.Execute(ctx, &job.ExecutionMessage{JobID: task.GetID(), ScriptPath: task.GetPath()})
 ```
 
 ## Configuration Options
