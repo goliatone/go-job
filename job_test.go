@@ -33,6 +33,35 @@ func (noopEngine) ParseJob(string, []byte) (job.Task, error)            { return
 func (noopEngine) CanHandle(string) bool                                { return true }
 func (noopEngine) Execute(context.Context, *job.ExecutionMessage) error { return nil }
 
+type builderTask struct {
+	id   string
+	path string
+	cfg  job.Config
+}
+
+func (b builderTask) BuildExecutionMessage(params map[string]any) (*job.ExecutionMessage, error) {
+	msg := &job.ExecutionMessage{
+		JobID:      b.id,
+		ScriptPath: b.path,
+		Config:     b.cfg,
+		Parameters: map[string]any{"script": "cached-script"},
+	}
+	for k, v := range params {
+		msg.Parameters[k] = v
+	}
+	return msg, nil
+}
+
+func (b builderTask) GetID() string                        { return b.id }
+func (b builderTask) GetHandler() func() error             { return func() error { return nil } }
+func (b builderTask) GetHandlerConfig() job.HandlerOptions { return job.HandlerOptions{} }
+func (b builderTask) GetConfig() job.Config                { return b.cfg }
+func (b builderTask) GetPath() string                      { return b.path }
+func (b builderTask) GetEngine() job.Engine                { return nil }
+func (b builderTask) Execute(context.Context, *job.ExecutionMessage) error {
+	return nil
+}
+
 func TestTaskExecuteUsesProvidedContext(t *testing.T) {
 	engine := &recordingEngine{}
 	task := job.NewBaseTask("ctx-task", "/tmp/script.js", "js", job.Config{}, "console.log('ok')", engine)
@@ -95,6 +124,36 @@ func TestBuildExecutionMessageUsesCachedScript(t *testing.T) {
 	assert.Equal(t, "cached", msg.JobID)
 	assert.Equal(t, "cached-script", msg.Parameters["script"])
 	assert.Equal(t, "bar", msg.Parameters["foo"])
+}
+
+func TestCompleteExecutionMessageMergesOverridesAndDefaults(t *testing.T) {
+	task := builderTask{id: "builder", path: "/tmp/builder.js", cfg: job.Config{Timeout: 3 * time.Second}}
+	called := false
+	cb := func(_, _ string) { called = true }
+	result := &job.Result{Status: "succeeded"}
+
+	msg := &job.ExecutionMessage{
+		Parameters:     map[string]any{"foo": "bar"},
+		IdempotencyKey: "idem-123",
+		DedupPolicy:    job.DedupPolicyMerge,
+		OutputCallback: cb,
+		Result:         result,
+	}
+
+	final, err := job.CompleteExecutionMessage(task, msg)
+	require.NoError(t, err)
+
+	assert.Equal(t, task.id, final.JobID)
+	assert.Equal(t, task.path, final.ScriptPath)
+	assert.Equal(t, "cached-script", final.Parameters["script"])
+	assert.Equal(t, "bar", final.Parameters["foo"])
+	assert.Equal(t, msg.IdempotencyKey, final.IdempotencyKey)
+	assert.Equal(t, msg.DedupPolicy, final.DedupPolicy)
+	require.NotNil(t, final.OutputCallback)
+	final.OutputCallback("out", "err")
+	assert.True(t, called)
+	assert.Equal(t, result, final.Result)
+	assert.Equal(t, task.cfg.Timeout, final.Config.Timeout)
 }
 
 func TestRegisterTasksWithMuxCreatesCommander(t *testing.T) {

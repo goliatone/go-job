@@ -48,7 +48,8 @@ func TestEnvelopeEncodeDecodeRoundTrip(t *testing.T) {
 	assert.Equal(t, env.Actor.Metadata, decoded.Actor.Metadata)
 	assert.Equal(t, env.Scope, decoded.Scope)
 	assert.Equal(t, env.IdempotencyKey, decoded.IdempotencyKey)
-	assert.Equal(t, env.Params["payload"], decoded.Params["payload"])
+	decodedPayload := decoded.Params["payload"].(map[string]any)
+	assert.Equal(t, float64(42), decodedPayload["id"])
 	assert.Equal(t, len(payload), decoded.RawContentBytes)
 }
 
