@@ -60,23 +60,33 @@ func CompleteExecutionMessage(task Task, msg *ExecutionMessage) (*ExecutionMessa
 		return base, nil
 	}
 
-	if msg.IdempotencyKey != "" {
-		base.IdempotencyKey = msg.IdempotencyKey
-	}
-	if msg.DedupPolicy != "" {
-		base.DedupPolicy = msg.DedupPolicy
-	}
-
 	if msg.JobID != "" {
 		base.JobID = msg.JobID
 	}
 	if msg.ScriptPath != "" {
 		base.ScriptPath = msg.ScriptPath
 	}
+	if msg.IdempotencyKey != "" {
+		base.IdempotencyKey = msg.IdempotencyKey
+	}
+	if msg.DedupPolicy != "" {
+		base.DedupPolicy = msg.DedupPolicy
+	}
+	if msg.OutputCallback != nil {
+		base.OutputCallback = msg.OutputCallback
+	}
+	if msg.Result != nil {
+		base.Result = msg.Result
+	}
 
 	base.Config = mergeConfigDefaults(task.GetConfig(), msg.Config)
 	if msg.Parameters != nil {
-		base.Parameters = cloneParams(msg.Parameters)
+		if base.Parameters == nil {
+			base.Parameters = make(map[string]any, len(msg.Parameters))
+		}
+		for k, v := range msg.Parameters {
+			base.Parameters[k] = v
+		}
 	}
 
 	return base, nil
@@ -86,12 +96,17 @@ func CompleteExecutionMessage(task Task, msg *ExecutionMessage) (*ExecutionMessa
 type TaskCommander struct {
 	Task    Task
 	tracker *IdempotencyTracker
+	limiter *ConcurrencyLimiter
+	quotas  QuotaChecker
+	scope   func(*ExecutionMessage) string
 }
 
 func NewTaskCommander(task Task) *TaskCommander {
 	return &TaskCommander{
 		Task:    task,
 		tracker: defaultIdempotencyTracker,
+		limiter: defaultConcurrencyLimiter,
+		quotas:  defaultQuotaChecker,
 	}
 }
 
@@ -104,7 +119,40 @@ func (c *TaskCommander) WithIdempotencyTracker(tracker *IdempotencyTracker) *Tas
 	return c
 }
 
+// WithConcurrencyLimiter overrides the limiter used for concurrency control.
+func (c *TaskCommander) WithConcurrencyLimiter(limiter *ConcurrencyLimiter) *TaskCommander {
+	if c == nil {
+		return nil
+	}
+	c.limiter = limiter
+	return c
+}
+
+// WithQuotaChecker overrides quota enforcement.
+func (c *TaskCommander) WithQuotaChecker(qc QuotaChecker) *TaskCommander {
+	if c == nil {
+		return nil
+	}
+	if qc != nil {
+		c.quotas = qc
+	}
+	return c
+}
+
+// WithScopeExtractor sets a scope extractor for concurrency keys.
+func (c *TaskCommander) WithScopeExtractor(fn func(*ExecutionMessage) string) *TaskCommander {
+	if c == nil {
+		return nil
+	}
+	c.scope = fn
+	return c
+}
+
 func (c *TaskCommander) Execute(ctx context.Context, msg *ExecutionMessage) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	if msg == nil {
 		return errors.New("execution message required", errors.CategoryBadInput).
 			WithTextCode("JOB_EXEC_MSG_NIL")
@@ -133,10 +181,48 @@ func (c *TaskCommander) Execute(ctx context.Context, msg *ExecutionMessage) erro
 		return prevErr
 	}
 
+	if err := c.quotas.Check(finalMsg); err != nil {
+		return err
+	}
+
+	release, err := c.acquireConcurrency(finalMsg)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	defer dedupAfterExecute(c.tracker, finalMsg, &err)
 
-	err = c.Task.Execute(ctx, finalMsg)
-	return err
+	maxRetries := finalMsg.Config.Retries
+	backoffCfg := finalMsg.Config.Backoff
+
+	for attempt := 0; ; attempt++ {
+		err = c.Task.Execute(ctx, finalMsg)
+		if err == nil {
+			return nil
+		}
+
+		if attempt >= maxRetries {
+			return err
+		}
+
+		delay := computeBackoffDelay(attempt+1, backoffCfg)
+		if sleepErr := backoffSleep(ctx, delay); sleepErr != nil {
+			return sleepErr
+		}
+	}
+}
+
+func (c *TaskCommander) acquireConcurrency(msg *ExecutionMessage) (func(), error) {
+	if c == nil || c.limiter == nil || msg == nil || msg.Config.MaxConcurrency <= 0 {
+		return func() {}, nil
+	}
+
+	limiter := c.limiter
+	if c.scope != nil {
+		limiter = limiter.WithScopeExtractor(c.scope)
+	}
+	return limiter.Acquire(msg, msg.Config.MaxConcurrency)
 }
 
 // TaskCommandPattern builds a mux pattern for the task commander.
