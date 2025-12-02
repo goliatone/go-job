@@ -7,6 +7,7 @@ import (
 
 	"github.com/goliatone/go-command"
 	"github.com/goliatone/go-command/router"
+	goerrors "github.com/goliatone/go-errors"
 	"github.com/goliatone/go-job"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -59,6 +60,26 @@ func (b builderTask) GetConfig() job.Config                { return b.cfg }
 func (b builderTask) GetPath() string                      { return b.path }
 func (b builderTask) GetEngine() job.Engine                { return nil }
 func (b builderTask) Execute(context.Context, *job.ExecutionMessage) error {
+	return nil
+}
+
+type simpleTask struct {
+	id     string
+	path   string
+	config job.Config
+	engine job.Engine
+}
+
+func (s simpleTask) GetID() string                        { return s.id }
+func (s simpleTask) GetHandler() func() error             { return func() error { return nil } }
+func (s simpleTask) GetHandlerConfig() job.HandlerOptions { return job.HandlerOptions{} }
+func (s simpleTask) GetConfig() job.Config                { return s.config }
+func (s simpleTask) GetPath() string                      { return s.path }
+func (s simpleTask) GetEngine() job.Engine                { return s.engine }
+func (s simpleTask) Execute(ctx context.Context, msg *job.ExecutionMessage) error {
+	if s.engine != nil {
+		return s.engine.Execute(ctx, msg)
+	}
 	return nil
 }
 
@@ -176,4 +197,54 @@ func TestRegisterTasksWithMuxCreatesCommander(t *testing.T) {
 	require.NotNil(t, engine.lastMsg)
 	assert.Equal(t, "mux-task", engine.lastMsg.JobID)
 	assert.Equal(t, "console.log('hi')", engine.lastMsg.Parameters["script"])
+}
+
+func TestBuildExecutionMessageForTaskNormalizesDefaults(t *testing.T) {
+	task := simpleTask{id: "simple", path: "/tmp/simple", engine: noopEngine{}}
+
+	msg, err := job.BuildExecutionMessageForTask(task, nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, "simple", msg.JobID)
+	assert.Equal(t, "/tmp/simple", msg.ScriptPath)
+	assert.Equal(t, job.DedupPolicyIgnore, msg.DedupPolicy)
+	require.NotNil(t, msg.Parameters)
+	assert.Empty(t, msg.Parameters)
+}
+
+func TestTaskCommanderRejectsNilExecutionMessage(t *testing.T) {
+	task := simpleTask{id: "nil-check", path: "/tmp/nil", engine: noopEngine{}}
+	cmd := job.NewTaskCommander(task)
+
+	err := cmd.Execute(context.Background(), nil)
+	require.Error(t, err)
+
+	var e *goerrors.Error
+	require.True(t, goerrors.As(err, &e))
+	assert.Equal(t, goerrors.CategoryValidation, e.Category)
+	assert.Equal(t, "JOB_EXEC_MSG_NIL", e.TextCode)
+}
+
+func TestTaskCommanderReportsValidationWhenRequiredFieldsMissing(t *testing.T) {
+	task := simpleTask{engine: noopEngine{}} // empty ID and path should fail validation
+	cmd := job.NewTaskCommander(task)
+
+	err := cmd.Execute(context.Background(), &job.ExecutionMessage{})
+	require.Error(t, err)
+
+	var e *goerrors.Error
+	require.True(t, goerrors.As(err, &e))
+	assert.Equal(t, goerrors.CategoryValidation, e.Category)
+
+	fieldErrors, ok := goerrors.GetValidationErrors(err)
+	require.True(t, ok)
+	assert.GreaterOrEqual(t, len(fieldErrors), 2)
+
+	fields := make(map[string]bool, len(fieldErrors))
+	for _, fe := range fieldErrors {
+		fields[fe.Field] = true
+	}
+
+	assert.True(t, fields["job_id"])
+	assert.True(t, fields["script_path"])
 }
