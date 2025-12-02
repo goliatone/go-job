@@ -197,6 +197,10 @@ func main() {
 
 Under the hood, `TaskCommander` wraps a `job.Task`, validates incoming `ExecutionMessage` payloads, and runs the task handler. Use this path when you need mux/dispatcher-driven execution instead of scheduler-driven execution.
 
+**ExecutionMessage validation & defaults**
+- Required: `job_id` and `script_path`. TaskCommander/CompleteExecutionMessage will fill these from the task metadata, but if they remain empty the command fails fast with a validation error (text code `JOB_EXEC_MSG_INVALID`).
+- Defaults: `parameters` is normalized to an empty map, and `dedup_policy` defaults to `ignore` when unspecified so idempotency checks remain safe.
+
 ### Basic Example (Manual Execution)
 
 ```go
