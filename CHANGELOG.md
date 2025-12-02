@@ -1,5 +1,19 @@
 # Changelog
 
+# [0.12.0](https://github.com/goliatone/go-job/compare/v0.11.0...v0.12.0) - (2025-12-02)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Upgrade go-command version ([d65b023](https://github.com/goliatone/go-job/commit/d65b0235ebea46d9dc06cd1bb41c6cd32fc48d7b))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.12.0 ([5fee96d](https://github.com/goliatone/go-job/commit/5fee96d2a2bf6267c4b38b919d5328733e0a8644))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.11.0 ([178f050](https://github.com/goliatone/go-job/commit/178f0506bb389275ea005d443d2c6b5366062bb4))  - (goliatone)
+
 # [0.11.0](https://github.com/goliatone/go-job/compare/v0.10.0...v0.11.0) - (2025-11-25)
 
 ## <!-- 13 -->📦 Bumps
