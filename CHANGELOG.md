@@ -1,5 +1,26 @@
 # Changelog
 
+# [0.13.0](https://github.com/goliatone/go-job/compare/v0.12.0...v0.13.0) - (2025-12-02)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Validate messages to ensure we do not hang ([de666a5](https://github.com/goliatone/go-job/commit/de666a5b25385baac74d88fee9957280575b9abc))  - (goliatone)
+- Improve error messages ([898b3b9](https://github.com/goliatone/go-job/commit/898b3b9ab5622c8ae36eda4debc62dee4370c339))  - (goliatone)
+- Ensure base tasks has proper defaults ([6415971](https://github.com/goliatone/go-job/commit/64159716764303f7ec19882ffc2edc7a4f70c6c1))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.13.0 ([41b82ea](https://github.com/goliatone/go-job/commit/41b82ea2f8299dc8078a22f7f7a21b15945b6976))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.12.0 ([9007ddc](https://github.com/goliatone/go-job/commit/9007ddcf3921d0ddff14cfc9146ffa88ae03d30a))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update readme ([5bbfb23](https://github.com/goliatone/go-job/commit/5bbfb23d4ffc135c458f7468bd541b2703032a13))  - (goliatone)
+- Update deps ([b7e23c4](https://github.com/goliatone/go-job/commit/b7e23c420a6a4c62a39fc486ce3041d8445cd151))  - (goliatone)
+
 # [0.12.0](https://github.com/goliatone/go-job/compare/v0.11.0...v0.12.0) - (2025-12-02)
 
 ## <!-- 1 -->🐛 Bug Fixes
