@@ -6,9 +6,9 @@ require (
 	github.com/dop251/goja v0.0.0-20250309171923-bcd7cc6bf64c
 	github.com/dop251/goja_nodejs v0.0.0-20250314160716-c55ecee183c0
 	github.com/go-viper/mapstructure/v2 v2.2.1
-	github.com/goliatone/go-command v0.4.0
+	github.com/goliatone/go-command v0.9.0
 	github.com/goliatone/go-errors v0.9.0
-	github.com/goliatone/go-logger v0.3.0
+	github.com/goliatone/go-logger v0.4.0
 	github.com/mattn/go-sqlite3 v1.14.28
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/stretchr/testify v1.10.0
@@ -16,7 +16,7 @@ require (
 )
 
 require (
-	github.com/alecthomas/kong v1.11.0 // indirect
+	github.com/alecthomas/kong v1.13.0 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
