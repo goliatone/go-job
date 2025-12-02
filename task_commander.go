@@ -34,9 +34,7 @@ func BuildExecutionMessageForTask(task Task, params map[string]any) (*ExecutionM
 		Config:     task.GetConfig(),
 		Parameters: cloneParams(params),
 	}
-	if msg.Parameters == nil {
-		msg.Parameters = make(map[string]any)
-	}
+	msg.normalize()
 	return msg, nil
 }
 
@@ -48,7 +46,14 @@ func CompleteExecutionMessage(task Task, msg *ExecutionMessage) (*ExecutionMessa
 	}
 
 	if composer, ok := task.(messageComposer); ok {
-		return composer.buildExecutionMessage(msg)
+		built, err := composer.buildExecutionMessage(msg)
+		if err != nil {
+			return nil, err
+		}
+		if built != nil {
+			built.normalize()
+		}
+		return built, nil
 	}
 
 	// Fallback path when the task does not expose the composer.
@@ -89,6 +94,7 @@ func CompleteExecutionMessage(task Task, msg *ExecutionMessage) (*ExecutionMessa
 		}
 	}
 
+	base.normalize()
 	return base, nil
 }
 
@@ -154,8 +160,12 @@ func (c *TaskCommander) Execute(ctx context.Context, msg *ExecutionMessage) erro
 	}
 
 	if msg == nil {
-		return errors.New("execution message required", errors.CategoryBadInput).
-			WithTextCode("JOB_EXEC_MSG_NIL")
+		return errors.NewValidation("execution message required",
+			errors.FieldError{
+				Field:   "execution_message",
+				Message: "cannot be nil; provide an ExecutionMessage with job_id and script_path",
+			},
+		).WithTextCode("JOB_EXEC_MSG_NIL")
 	}
 
 	if c == nil || c.Task == nil {
