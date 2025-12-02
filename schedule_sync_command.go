@@ -104,7 +104,7 @@ func (c *ScheduleSyncCommand) CLIHandler() any {
 // CLIOptions returns CLI metadata for registration.
 func (c *ScheduleSyncCommand) CLIOptions() command.CLIConfig {
 	return command.CLIConfig{
-		Name:        c.cliName,
+		Path:        []string{c.cliName},
 		Description: c.cliDesc,
 		Group:       c.cliGroup,
 	}
