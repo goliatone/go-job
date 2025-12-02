@@ -106,6 +106,7 @@ func (j *baseTask) buildExecutionMessage(msg *ExecutionMessage) (*ExecutionMessa
 		msg.Parameters["script"] = j.scriptContent
 	}
 
+	msg.normalize()
 	return msg, nil
 }
 
