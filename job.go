@@ -24,12 +24,18 @@ type TaskCreator interface {
 }
 
 // ExecutionMessage represents a request to execute a job script.
+// Required fields: JobID and ScriptPath (either provided by the caller or by the Task metadata).
+// Optional fields: Config, Parameters, IdempotencyKey, DedupPolicy, Result, and OutputCallback.
 type ExecutionMessage struct {
-	JobID          string                      `json:"job_id" yaml:"job_id"`
-	ScriptPath     string                      `json:"script_path" yaml:"script_path"`
-	Config         Config                      `json:"config" yaml:"config"`
-	Parameters     map[string]any              `json:"parameters" yaml:"parameters"`
-	IdempotencyKey string                      `json:"idempotency_key" yaml:"idempotency_key"`
+	// JobID identifies the task to run. Filled from Task.GetID() when using TaskCommander/CompleteExecutionMessage.
+	JobID string `json:"job_id" yaml:"job_id"`
+	// ScriptPath is the filesystem path to the script. Filled from Task.GetPath() when using TaskCommander/CompleteExecutionMessage.
+	ScriptPath string `json:"script_path" yaml:"script_path"`
+	Config     Config `json:"config" yaml:"config"`
+	// Parameters carries runtime inputs. Defaults to an empty map to avoid nil dereferences when normalized.
+	Parameters     map[string]any `json:"parameters" yaml:"parameters"`
+	IdempotencyKey string         `json:"idempotency_key" yaml:"idempotency_key"`
+	// DedupPolicy determines how idempotency keys are handled. Defaults to ignore when left empty.
 	DedupPolicy    DeduplicationPolicy         `json:"dedup_policy" yaml:"dedup_policy"`
 	Result         *Result                     `json:"result,omitempty" yaml:"result,omitempty"`
 	OutputCallback func(stdout, stderr string) `json:"-" yaml:"-"`
@@ -40,14 +46,14 @@ func (msg ExecutionMessage) Type() string {
 	return "job:runner:execution"
 }
 
-// Validate ensures the message contains required fields
+// Validate ensures the message contains required fields.
 func (msg ExecutionMessage) Validate() error {
 	var fieldErrors []errors.FieldError
 
 	if msg.JobID == "" {
 		fieldErrors = append(fieldErrors, errors.FieldError{
 			Field:   "job_id",
-			Message: "cannot be empty",
+			Message: "required; provide ExecutionMessage.JobID or ensure the task exposes a non-empty GetID()",
 			Value:   msg.JobID,
 		})
 	}
@@ -55,7 +61,7 @@ func (msg ExecutionMessage) Validate() error {
 	if msg.ScriptPath == "" {
 		fieldErrors = append(fieldErrors, errors.FieldError{
 			Field:   "script_path",
-			Message: "cannot be empty",
+			Message: "required; provide ExecutionMessage.ScriptPath or ensure the task exposes a non-empty GetPath()",
 			Value:   msg.ScriptPath,
 		})
 	}
@@ -90,6 +96,20 @@ func (msg ExecutionMessage) Validate() error {
 	}
 
 	return nil
+}
+
+// normalize fills defaults that keep downstream execution safe from nil dereferences
+// and sets explicit values for optional policies.
+func (msg *ExecutionMessage) normalize() {
+	if msg == nil {
+		return
+	}
+	if msg.Parameters == nil {
+		msg.Parameters = make(map[string]any)
+	}
+	if msg.DedupPolicy == "" {
+		msg.DedupPolicy = DedupPolicyIgnore
+	}
 }
 
 // Task represents a schedulable job discovered from the filesystem
