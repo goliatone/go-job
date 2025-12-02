@@ -6,7 +6,7 @@ require (
 	github.com/dop251/goja v0.0.0-20250309171923-bcd7cc6bf64c
 	github.com/dop251/goja_nodejs v0.0.0-20250314160716-c55ecee183c0
 	github.com/go-viper/mapstructure/v2 v2.2.1
-	github.com/goliatone/go-command v0.9.0
+	github.com/goliatone/go-command v0.10.0
 	github.com/goliatone/go-errors v0.9.0
 	github.com/goliatone/go-logger v0.4.0
 	github.com/mattn/go-sqlite3 v1.14.28
