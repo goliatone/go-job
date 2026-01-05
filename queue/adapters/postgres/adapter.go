@@ -1,0 +1,72 @@
+package postgres
+
+import (
+	"context"
+
+	job "github.com/goliatone/go-job"
+	"github.com/goliatone/go-job/queue"
+)
+
+// Adapter bridges the storage implementation to queue interfaces.
+type Adapter struct {
+	storage queue.Storage
+}
+
+// NewAdapter builds a queue adapter from a storage implementation.
+func NewAdapter(storage queue.Storage) *Adapter {
+	return &Adapter{storage: storage}
+}
+
+// Enqueue forwards to the underlying storage.
+func (a *Adapter) Enqueue(ctx context.Context, msg *job.ExecutionMessage) error {
+	if a == nil || a.storage == nil {
+		return nil
+	}
+	return a.storage.Enqueue(ctx, msg)
+}
+
+// Dequeue returns a delivery wrapper when available.
+func (a *Adapter) Dequeue(ctx context.Context) (queue.Delivery, error) {
+	if a == nil || a.storage == nil {
+		return nil, nil
+	}
+	msg, receipt, err := a.storage.Dequeue(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if msg == nil {
+		return nil, nil
+	}
+	return &delivery{storage: a.storage, msg: msg, receipt: receipt}, nil
+}
+
+type delivery struct {
+	storage queue.Storage
+	msg     *job.ExecutionMessage
+	receipt queue.Receipt
+}
+
+func (d *delivery) Message() *job.ExecutionMessage {
+	return d.msg
+}
+
+func (d *delivery) Ack(ctx context.Context) error {
+	if d == nil || d.storage == nil {
+		return nil
+	}
+	return d.storage.Ack(ctx, d.receipt)
+}
+
+func (d *delivery) Nack(ctx context.Context, opts queue.NackOptions) error {
+	if d == nil || d.storage == nil {
+		return nil
+	}
+	return d.storage.Nack(ctx, d.receipt, opts)
+}
+
+func (d *delivery) Attempts() int {
+	if d == nil {
+		return 0
+	}
+	return d.receipt.Attempts
+}
