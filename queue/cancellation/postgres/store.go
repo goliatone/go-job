@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	defaultTableName   = "queue_cancellations"
+	defaultTableName    = "queue_cancellations"
 	defaultPollInterval = 200 * time.Millisecond
 	defaultBatchSize    = 100
 )
