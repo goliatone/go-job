@@ -1,5 +1,45 @@
 # Changelog
 
+# [0.14.0](https://github.com/goliatone/go-job/compare/v0.13.0...v0.14.0) - (2026-01-05)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Use new decoder logic ([7c24ac7](https://github.com/goliatone/go-job/commit/7c24ac75382b282854c84db0cd9eba635239ae44))  - (goliatone)
+- Queue generic command ([9a1df52](https://github.com/goliatone/go-job/commit/9a1df52c34b3d53939524dbb128ac084a95c7b69))  - (goliatone)
+- Conflicting names ([2f8b4d6](https://github.com/goliatone/go-job/commit/2f8b4d6f1fa2262c7fc5b4ec2249cfe9f5dd823c))  - (goliatone)
+- Use message decoder ([3789226](https://github.com/goliatone/go-job/commit/3789226cf8796f6f438f1043c5808a90a0556e8e))  - (goliatone)
+- Return errors on failure ([428b483](https://github.com/goliatone/go-job/commit/428b483be97e11740dc3260e34a1074c033bca55))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.14.0 ([0fa69b7](https://github.com/goliatone/go-job/commit/0fa69b73fab04fbedc3ee34ee505e6b0b1acf2e3))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Command resolver to match go-command interface ([80ba033](https://github.com/goliatone/go-job/commit/80ba03349db687d21cbb911ab70e48e263f4040b))  - (goliatone)
+- Queue command registry adapter ([baf6065](https://github.com/goliatone/go-job/commit/baf606546d6c66a92ee7b5c0335f77987f84595f))  - (goliatone)
+- Queue message codec ([0c53532](https://github.com/goliatone/go-job/commit/0c53532ef50d57f9c64416fc815c40ad18f38e1c))  - (goliatone)
+- Error handler for worker ([bbf76c9](https://github.com/goliatone/go-job/commit/bbf76c9d844e7fe3f93b3bc7b78d0aa75741e0cf))  - (goliatone)
+- Retry management in task commander ([bbe0ba2](https://github.com/goliatone/go-job/commit/bbe0ba28bcab9446f2beee171a7d1015fb04ad5a))  - (goliatone)
+- Envelop support for jobs ([a6c8847](https://github.com/goliatone/go-job/commit/a6c8847a72ef55557db9068ef90ecc10cb6414e0))  - (goliatone)
+- Envelop codec; ([b12c06e](https://github.com/goliatone/go-job/commit/b12c06e17a8e25c8018df3ef92efa9137de4e1b2))  - (goliatone)
+- Queue implementation ([9af1846](https://github.com/goliatone/go-job/commit/9af18465650a7763ae80417bdddcda2b9a3023e5))  - (goliatone)
+
+## <!-- 2 -->🚜 Refactor
+
+- Make command register work with generic Command ([ca344fb](https://github.com/goliatone/go-job/commit/ca344fb67ee275b12a09090af459f148e367ffbe))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.13.0 ([736f801](https://github.com/goliatone/go-job/commit/736f801d5e703b4c0b427f03ca7050df7ee52b75))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update tests ([a6bf84a](https://github.com/goliatone/go-job/commit/a6bf84ae866b42506aee70775b0eb11cf196de5d))  - (goliatone)
+- Update deps ([c7cca4c](https://github.com/goliatone/go-job/commit/c7cca4cf09108937a4cf589383f7e5e0aa016a3f))  - (goliatone)
+- Update docs ([dcfa696](https://github.com/goliatone/go-job/commit/dcfa6966229f2ce8f77e6fda52f53cb336b51810))  - (goliatone)
+- Update readme ([385179a](https://github.com/goliatone/go-job/commit/385179ac6be1d82b05c256c7561a6341df7e5be2))  - (goliatone)
+
 # [0.13.0](https://github.com/goliatone/go-job/compare/v0.12.0...v0.13.0) - (2025-12-02)
 
 ## <!-- 1 -->🐛 Bug Fixes
