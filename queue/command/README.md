@@ -1,83 +1,156 @@
 # queue/command
 
-This package will adapt go-command commands so they can run as background jobs via go-job queue workers.
-It keeps go-command as the single source of truth and builds job Tasks from the command registry.
+`queue/command` lets you run [go-command](https://github.com/goliatone/go-command) handlers as background jobs using go-job’s queue worker, without duplicating business logic. You register commands once, then decide to execute them via CLI/HTTP/cron or by enqueuing a job.
 
-## Goals
-- Reuse go-command registry for discovery/metadata.
-- Run the same command logic from CLI/HTTP/cron and from the queue worker.
-- Avoid duplicating command definitions or wiring.
+## Concepts
 
-## Conceptual Model
-- **Command registry** (go-command) owns commands and metadata.
-- **Task registry** (go-job worker) is derived from the command registry.
-- **ExecutionMessage.JobID** == command ID.
-- **ExecutionMessage.Parameters** == command params.
-- **ScriptPath** is optional and unused for non-script commands.
+- **Command registry** (`queue/command.Registry`) stores handlers by command id.
+- **Command id** is derived from `go-command`’s `GetMessageType` for the command’s message type.
+- **ExecutionMessage.Parameters** is decoded into the command message type before `Execute`.
+- **ExecutionMessage.JobID** and **ScriptPath** are set to the command id for queue routing.
 
-## API Overview
+## Registering Commands
 
-### Adapter Task
-Wraps a command from the registry into a `job.Task` so the worker can execute it.
-
-```go
-// queue/command/task.go
-package command
-
-type Registry struct { /* ... */ }
-
-type Task struct { /* ... */ }
-
-func NewRegistry() *Registry
-func NewTask(reg *Registry, id string) *Task
-```
-
-`Task.Execute` looks up the command by ID and decodes `ExecutionMessage.Parameters` into
-the command's message type before calling `Execute(ctx, msg)`.
-
-### Registration Helpers
-Register commands with the queue registry (and optionally the go-command registry).
-
-```go
-// queue/command/register.go
-func RegisterCommand[T any](reg *Registry, cmd command.Commander[T]) error
-func RegisterCommandWithRegistry[T any](reg *Registry, cmd command.Commander[T], runnerOpts ...runner.Option) (dispatcher.Subscription, error)
-
-// queue/command/worker.go
-func RegisterAll(w *worker.Worker, reg *Registry, ids []string) error
-```
-
-### Enqueue Helper
-Validate that a command exists in the registry, then enqueue a background job.
-
-```go
-// queue/command/enqueue.go
-func Enqueue(ctx context.Context, enq queue.Enqueuer, reg *Registry, id string, params map[string]any) error
-```
-
-## Optional Command Metadata
-If go-command commands expose metadata interfaces, we can map them to job behavior:
-- Retries/backoff -> `ExecutionMessage.Config`
-- Idempotency key -> `ExecutionMessage.IdempotencyKey`
-- Dedup policy -> `ExecutionMessage.DedupPolicy`
-
-These will be additive and optional; commands without metadata still work.
-
-## Example Usage (conceptual)
+You can register commands with the queue registry only, or attach the queue resolver to
+`go-command` so queue registration happens during `Registry.Initialize()`.
 
 ```go
 cmdReg := queuecmd.NewRegistry()
-_, _ = queuecmd.RegisterCommandWithRegistry(cmdReg, exportCmd)
-_, _ = queuecmd.RegisterCommandWithRegistry(cmdReg, deliverCmd)
 
-worker := worker.NewWorker(dequeuer)
-_ = queuecmd.RegisterAll(worker, cmdReg, nil)
-
-id := gocmd.GetMessageType(ExportMessage{})
-_ = queuecmd.Enqueue(ctx, enqueuer, cmdReg, id, map[string]any{"export_id": "123"})
+// Queue only registration
+_ = queuecmd.RegisterCommand(cmdReg, exportCmd)
 ```
 
-## Notes
-- go-command remains the source of truth; go-job only adapts it.
-- This package is intentionally small and focused on wiring.
-- Tests should validate registry lookup, Execute wiring, and enqueue validation.
+Resolver based registration (local registry):
+
+```go
+cmdReg := command.NewRegistry()
+queueReg := queuecmd.NewRegistry()
+
+_ = cmdReg.AddResolver("queue", queuecmd.QueueResolver(queueReg))
+_, _ = queuecmd.RegisterCommandWithRegistry(queueReg, deliverCmd)
+_ = cmdReg.Initialize()
+```
+
+`RegisterCommandWithRegistry` only registers with `go-command`, queue registration happens through the resolver during `Initialize()`.
+
+Resolver based registration (global registry):
+
+```go
+queueReg := queuecmd.NewRegistry()
+_ = commandregistry.AddResolver("queue", queuecmd.QueueResolver(queueReg))
+_, _ = queuecmd.RegisterCommandWithRegistry(queueReg, deliverCmd)
+_ = commandregistry.Start(ctx)
+```
+
+## Running Commands in the Worker
+
+The worker registers tasks derived from the command registry. When `ids` is `nil` or empty, all registered commands are added.
+
+```go
+w := worker.NewWorker(dequeuer)
+_ = queuecmd.RegisterAll(w, cmdReg, nil)
+_ = w.Start(ctx)
+```
+
+## Enqueueing a Command
+
+Use `go-command` to get the id from the message type, then enqueue with params.
+
+```go
+id := gocmd.GetMessageType(ExportMessage{})
+_ = queuecmd.Enqueue(ctx, enqueuer, cmdReg, id, map[string]any{
+	"export_id": "123",
+})
+```
+
+## Parameter Decoding
+
+`ExecutionMessage.Parameters` is decoded into the command’s message type using
+`mapstructure` with `json` tags and weak typing enabled. This lets you pass a map
+from HTTP/CLI and have it materialize as the strongly typed command input.
+
+## Defining a Command (with CLI/Cron Auto Registration)
+
+Commands implement `go-command`’s `Commander[T]` interface:
+
+```go
+type ExportMessage struct {
+	ExportID string `json:"export_id"`
+}
+
+type ExportCommand struct{}
+
+func (c *ExportCommand) Execute(ctx context.Context, msg ExportMessage) error {
+	// business logic
+	return nil
+}
+```
+
+Add optional interfaces to autoregister the same command for CLI and cron:
+
+```go
+// CLICommand
+func (c *ExportCommand) CLIHandler() any { return &ExportCLI{} }
+
+func (c *ExportCommand) CLIOptions() command.CLIConfig {
+	return command.CLIConfig{
+		Path:        []string{"export", "run"},
+		Description: "Run export on demand",
+	}
+}
+
+// CronCommand
+func (c *ExportCommand) CronHandler() func() error {
+	return func() error { return nil }
+}
+
+func (c *ExportCommand) CronOptions() command.HandlerConfig {
+	return command.HandlerConfig{
+		Expression: "0 * * * *",
+		MaxRetries: 3,
+	}
+}
+```
+
+Register the command with `go-command`, and let the queue resolver handle queue registration:
+
+```go
+cmdReg := command.NewRegistry()
+queueReg := queuecmd.NewRegistry()
+_ = cmdReg.AddResolver("queue", queuecmd.QueueResolver(queueReg))
+_, _ = queuecmd.RegisterCommandWithRegistry(queueReg, &ExportCommand{})
+_ = cmdReg.Initialize()
+```
+
+Now the same command can be triggered by CLI/cron/HTTP and enqueued as a background
+job via `queuecmd.Enqueue`:
+
+```go
+id := gocmd.GetMessageType(ExportMessage{})
+_ = queuecmd.Enqueue(ctx, enqueuer, cmdReg, id, map[string]any{
+	"export_id": "123",
+})
+```
+
+## Optional Metadata
+
+Commands can optionally implement:
+
+```go
+type ConfigProvider interface {
+	JobConfig() job.Config
+}
+```
+
+When present, the config is attached to the task and used by the worker.
+
+## API Summary
+
+- `NewRegistry() *Registry`
+- `RegisterCommand[T any](reg *Registry, cmd command.Commander[T]) error`
+- `RegisterCommandByType(reg *Registry, cmd any, meta command.CommandMeta) error`
+- `RegisterCommandWithRegistry[T any](reg *Registry, cmd command.Commander[T], runnerOpts ...runner.Option) (dispatcher.Subscription, error)`
+- `QueueResolver(reg *Registry) command.Resolver`
+- `RegisterAll(w *worker.Worker, reg *Registry, ids []string) error`
+- `Enqueue(ctx context.Context, enq queue.Enqueuer, reg *Registry, id string, params map[string]any) error`
