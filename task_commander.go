@@ -105,6 +105,7 @@ type TaskCommander struct {
 	limiter *ConcurrencyLimiter
 	quotas  QuotaChecker
 	scope   func(*ExecutionMessage) string
+	retries *int
 }
 
 func NewTaskCommander(task Task) *TaskCommander {
@@ -151,6 +152,18 @@ func (c *TaskCommander) WithScopeExtractor(fn func(*ExecutionMessage) string) *T
 		return nil
 	}
 	c.scope = fn
+	return c
+}
+
+// WithRetryOverride forces TaskCommander to use the provided retry count.
+func (c *TaskCommander) WithRetryOverride(maxRetries int) *TaskCommander {
+	if c == nil {
+		return nil
+	}
+	if maxRetries < 0 {
+		maxRetries = 0
+	}
+	c.retries = &maxRetries
 	return c
 }
 
@@ -204,6 +217,9 @@ func (c *TaskCommander) Execute(ctx context.Context, msg *ExecutionMessage) erro
 	defer dedupAfterExecute(c.tracker, finalMsg, &err)
 
 	maxRetries := finalMsg.Config.Retries
+	if c.retries != nil {
+		maxRetries = *c.retries
+	}
 	backoffCfg := finalMsg.Config.Backoff
 
 	for attempt := 0; ; attempt++ {
