@@ -359,7 +359,7 @@ func (w *Worker) handleDelivery(ctx context.Context, delivery queue.Delivery) {
 	cancelState := &cancelState{}
 	cancelKey := w.cancellationKey(msg)
 	if cancelKey != "" && w.checkCancellation(ctx, cancelKey, cancelState) {
-		opts := w.cancelNackOptions(cancelState.reason())
+		opts := w.cancelNackOptions(cancelState.reasonText())
 		w.failDelivery(ctx, event, context.Canceled, opts)
 		return
 	}
@@ -396,8 +396,8 @@ func (w *Worker) handleDelivery(ctx context.Context, delivery queue.Delivery) {
 		return
 	}
 
-	if cancelState.requested() {
-		opts := w.cancelNackOptions(cancelState.reason())
+	if cancelState.isRequested() {
+		opts := w.cancelNackOptions(cancelState.reasonText())
 		w.failDelivery(ctx, event, execErr, opts)
 		return
 	}
