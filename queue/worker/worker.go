@@ -348,7 +348,7 @@ func (w *Worker) handleDelivery(ctx context.Context, delivery queue.Delivery) {
 	}
 	event.Task = entry.Task
 
-	if msg.ScriptPath != entry.Task.GetPath() {
+	if msg.ScriptPath != "" && msg.ScriptPath != entry.Task.GetPath() {
 		w.failDelivery(ctx, event, fmt.Errorf("script path mismatch for task %q", msg.JobID), queue.NackOptions{
 			DeadLetter: true,
 			Reason:     "script path mismatch",
