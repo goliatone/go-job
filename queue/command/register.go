@@ -27,43 +27,114 @@ func RegisterCommand[T any](reg *Registry, cmd command.Commander[T]) error {
 		return fmt.Errorf("command cannot be nil")
 	}
 
-	messageType := messageTypeFor[T]()
+	meta := command.MessageTypeForCommand(cmd)
+	return RegisterCommandByType(reg, cmd, meta)
+}
+
+// RegisterCommandByType registers a command using resolver metadata.
+func RegisterCommandByType(reg *Registry, cmd any, meta command.CommandMeta) error {
+	if reg == nil {
+		return fmt.Errorf("command registry not configured")
+	}
+	if cmd == nil {
+		return fmt.Errorf("command cannot be nil")
+	}
+
+	method, methodMsgType, err := executeMethod(cmd)
+	if err != nil {
+		return err
+	}
+
+	msgType := methodMsgType
+	if meta.MessageTypeValue != nil {
+		msgType = meta.MessageTypeValue
+		if !msgType.AssignableTo(methodMsgType) {
+			return fmt.Errorf("command message type mismatch")
+		}
+	}
+
+	messageType, err := messageTypeFromMeta(meta, msgType)
+	if err != nil {
+		return err
+	}
+
+	if _, ok := reg.Get(messageType); ok {
+		return nil
+	}
 
 	entry := Entry{
 		ID:          messageType,
 		MessageType: messageType,
 		Handler: func(ctx context.Context, params map[string]any) error {
-			payload, err := decodeParams[T](params)
+			payload, err := decodeParamsByType(msgType, params)
 			if err != nil {
 				return err
 			}
-			return cmd.Execute(ctx, payload)
+			return callExecute(method, ctx, payload)
 		},
 	}
 
-	if provider, ok := any(cmd).(ConfigProvider); ok {
+	if provider, ok := cmd.(ConfigProvider); ok {
 		entry.Config = provider.JobConfig()
 	}
 
 	return reg.Register(entry)
 }
 
-func messageTypeFor[T any]() string {
-	msgType := reflect.TypeOf((*T)(nil)).Elem()
-	var msgValue reflect.Value
-	if msgType.Kind() == reflect.Ptr {
-		msgValue = reflect.New(msgType.Elem())
-	} else {
-		msgValue = reflect.New(msgType).Elem()
+func messageTypeFromMeta(meta command.CommandMeta, msgType reflect.Type) (string, error) {
+	if meta.MessageType != "" {
+		return meta.MessageType, nil
 	}
-	return command.GetMessageType(msgValue.Interface())
+	if meta.MessageValue != nil {
+		return command.GetMessageType(meta.MessageValue), nil
+	}
+	if msgType == nil {
+		return "", fmt.Errorf("command message type required")
+	}
+	msgValue := newValue(msgType)
+	return command.GetMessageType(msgValue.Interface()), nil
 }
 
-// RegisterCommandWithRegistry registers a command with go-command registry and the queue registry.
-func RegisterCommandWithRegistry[T any](reg *Registry, cmd command.Commander[T], runnerOpts ...runner.Option) (dispatcher.Subscription, error) {
-	sub, err := commandregistry.RegisterCommand(cmd, runnerOpts...)
-	if err != nil {
-		return sub, err
+func executeMethod(cmd any) (reflect.Value, reflect.Type, error) {
+	method := reflect.ValueOf(cmd).MethodByName("Execute")
+	if !method.IsValid() {
+		return reflect.Value{}, nil, fmt.Errorf("command must implement Execute(ctx, msg) error")
 	}
-	return sub, RegisterCommand(reg, cmd)
+
+	methodType := method.Type()
+	if methodType.NumIn() != 2 {
+		return reflect.Value{}, nil, fmt.Errorf("command Execute signature must be Execute(ctx, msg) error")
+	}
+
+	ctxType := reflect.TypeOf((*context.Context)(nil)).Elem()
+	if !ctxType.AssignableTo(methodType.In(0)) {
+		return reflect.Value{}, nil, fmt.Errorf("command Execute signature must accept context.Context")
+	}
+
+	errType := reflect.TypeOf((*error)(nil)).Elem()
+	if methodType.NumOut() != 1 || !methodType.Out(0).Implements(errType) {
+		return reflect.Value{}, nil, fmt.Errorf("command Execute signature must return error")
+	}
+
+	return method, methodType.In(1), nil
+}
+
+func callExecute(method reflect.Value, ctx context.Context, msg reflect.Value) error {
+	results := method.Call([]reflect.Value{reflect.ValueOf(ctx), msg})
+	if len(results) == 0 {
+		return nil
+	}
+	if results[0].IsNil() {
+		return nil
+	}
+	if err, ok := results[0].Interface().(error); ok {
+		return err
+	}
+	return fmt.Errorf("command Execute returned non-error")
+}
+
+// RegisterCommandWithRegistry registers a command with go-command registry.
+// Queue registration is handled by QueueResolver during registry initialization.
+func RegisterCommandWithRegistry[T any](_ *Registry, cmd command.Commander[T], runnerOpts ...runner.Option) (dispatcher.Subscription, error) {
+	return commandregistry.RegisterCommand(cmd, runnerOpts...)
 }
