@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -169,7 +168,7 @@ func (s *Storage) Enqueue(ctx context.Context, msg *job.ExecutionMessage) error 
 		return err
 	}
 
-	payload, err := json.Marshal(msg)
+	payload, err := queue.EncodeExecutionMessage(msg)
 	if err != nil {
 		return err
 	}
@@ -437,14 +436,7 @@ func (s *Storage) deleteMessage(ctx context.Context, tx *sql.Tx, receipt queue.R
 }
 
 func decodeMessage(payload string) (*job.ExecutionMessage, error) {
-	if payload == "" {
-		return nil, fmt.Errorf("payload empty")
-	}
-	var msg job.ExecutionMessage
-	if err := json.Unmarshal([]byte(payload), &msg); err != nil {
-		return nil, err
-	}
-	return &msg, nil
+	return queue.DecodeExecutionMessage([]byte(payload))
 }
 
 func rollback(tx *sql.Tx) {
