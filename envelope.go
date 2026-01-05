@@ -1,7 +1,6 @@
 package job
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/goliatone/go-errors"
@@ -69,57 +68,17 @@ func WithEnvelopeSanitizer(fn EnvelopeSanitizer) EnvelopeOption {
 
 // EncodeEnvelope marshals the envelope to JSON applying validation, sanitization, and size limits.
 func EncodeEnvelope(env Envelope, opts ...EnvelopeOption) ([]byte, error) {
-	cfg := buildEnvelopeConfig(opts...)
-	if err := env.Validate(); err != nil {
-		return nil, err
-	}
-
-	working := env.clone()
-	working.Params = sanitizeParams(env.Params, cfg.sanitizer)
-
-	payload, err := json.Marshal(working)
-	if err != nil {
-		return nil, fmt.Errorf("encode envelope: %w", err)
-	}
-
-	if cfg.maxBytes > 0 && len(payload) > cfg.maxBytes {
-		return nil, errors.NewValidation("envelope exceeds maximum bytes",
-			errors.FieldError{
-				Field:   "envelope",
-				Message: fmt.Sprintf("encoded envelope size %d exceeds limit %d bytes", len(payload), cfg.maxBytes),
-				Value:   len(payload),
-			},
-		)
-	}
-
-	return payload, nil
+	codec := NewJSONEnvelopeCodec(opts...)
+	return codec.Encode(env)
 }
 
 // DecodeEnvelope unmarshals JSON data into an Envelope, enforcing size limits and validation.
 func DecodeEnvelope(data []byte, opts ...EnvelopeOption) (Envelope, error) {
-	cfg := buildEnvelopeConfig(opts...)
-	if cfg.maxBytes > 0 && len(data) > cfg.maxBytes {
-		return Envelope{}, errors.NewValidation("envelope exceeds maximum bytes",
-			errors.FieldError{
-				Field:   "envelope",
-				Message: fmt.Sprintf("encoded envelope size %d exceeds limit %d bytes", len(data), cfg.maxBytes),
-				Value:   len(data),
-			},
-		)
-	}
-
+	codec := NewJSONEnvelopeCodec(opts...)
 	var env Envelope
-	if err := json.Unmarshal(data, &env); err != nil {
-		return Envelope{}, fmt.Errorf("decode envelope: %w", err)
-	}
-
-	env.RawContentBytes = len(data)
-	env.Params = sanitizeParams(env.Params, cfg.sanitizer)
-
-	if err := env.Validate(); err != nil {
+	if err := codec.Decode(data, &env); err != nil {
 		return Envelope{}, err
 	}
-
 	return env, nil
 }
 
@@ -147,6 +106,34 @@ func (env Envelope) Validate() error {
 	}
 
 	return nil
+}
+
+// EnvelopeActor returns the actor metadata for envelope codecs.
+func (env Envelope) EnvelopeActor() any { return env.Actor }
+
+// EnvelopeScope returns the scope metadata for envelope codecs.
+func (env Envelope) EnvelopeScope() any { return env.Scope }
+
+// EnvelopeIdempotencyKey returns the idempotency key for envelope codecs.
+func (env Envelope) EnvelopeIdempotencyKey() string { return env.IdempotencyKey }
+
+// EnvelopeParams returns params for envelope codecs.
+func (env Envelope) EnvelopeParams() map[string]any { return env.Params }
+
+// SetEnvelopeParams updates params after sanitization.
+func (env *Envelope) SetEnvelopeParams(params map[string]any) {
+	if env == nil {
+		return
+	}
+	env.Params = params
+}
+
+// SetEnvelopeRawContentBytes stores the decoded payload size.
+func (env *Envelope) SetEnvelopeRawContentBytes(size int) {
+	if env == nil {
+		return
+	}
+	env.RawContentBytes = size
 }
 
 func buildEnvelopeConfig(opts ...EnvelopeOption) envelopeConfig {
