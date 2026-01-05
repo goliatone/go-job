@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 
 	job "github.com/goliatone/go-job"
 	"github.com/goliatone/go-job/queue"
@@ -20,7 +21,7 @@ func NewAdapter(storage queue.Storage) *Adapter {
 // Enqueue forwards to the underlying storage.
 func (a *Adapter) Enqueue(ctx context.Context, msg *job.ExecutionMessage) error {
 	if a == nil || a.storage == nil {
-		return nil
+		return fmt.Errorf("queue adapter not configured")
 	}
 	return a.storage.Enqueue(ctx, msg)
 }
@@ -28,7 +29,7 @@ func (a *Adapter) Enqueue(ctx context.Context, msg *job.ExecutionMessage) error 
 // Dequeue returns a delivery wrapper when available.
 func (a *Adapter) Dequeue(ctx context.Context) (queue.Delivery, error) {
 	if a == nil || a.storage == nil {
-		return nil, nil
+		return nil, fmt.Errorf("queue adapter not configured")
 	}
 	msg, receipt, err := a.storage.Dequeue(ctx)
 	if err != nil {
@@ -52,14 +53,14 @@ func (d *delivery) Message() *job.ExecutionMessage {
 
 func (d *delivery) Ack(ctx context.Context) error {
 	if d == nil || d.storage == nil {
-		return nil
+		return fmt.Errorf("queue delivery not configured")
 	}
 	return d.storage.Ack(ctx, d.receipt)
 }
 
 func (d *delivery) Nack(ctx context.Context, opts queue.NackOptions) error {
 	if d == nil || d.storage == nil {
-		return nil
+		return fmt.Errorf("queue delivery not configured")
 	}
 	return d.storage.Nack(ctx, d.receipt, opts)
 }
