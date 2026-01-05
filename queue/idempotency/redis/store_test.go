@@ -128,8 +128,8 @@ func (c *fakeClient) Set(_ context.Context, key, value string, ttl time.Duration
 func (c *fakeClient) SetNX(_ context.Context, key, value string, ttl time.Duration) (bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	entry, ok := c.store[key]
-	if ok && !entry.expiresAt.IsZero() && !entry.expiresAt.After(c.now()) {
+	stored, ok := c.store[key]
+	if ok && !stored.expiresAt.IsZero() && !stored.expiresAt.After(c.now()) {
 		delete(c.store, key)
 		ok = false
 	}
