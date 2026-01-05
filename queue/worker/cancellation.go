@@ -26,7 +26,7 @@ func (c *cancelState) set(req cancellation.Request) {
 	c.reason = req.Reason
 }
 
-func (c *cancelState) requested() bool {
+func (c *cancelState) isRequested() bool {
 	if c == nil {
 		return false
 	}
@@ -35,7 +35,7 @@ func (c *cancelState) requested() bool {
 	return c.requested
 }
 
-func (c *cancelState) reason() string {
+func (c *cancelState) reasonText() string {
 	if c == nil {
 		return ""
 	}
