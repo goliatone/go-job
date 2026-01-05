@@ -78,6 +78,7 @@ func defaultMapAuthActor(src any) (*Actor, Scope, error) {
 		return nil, Scope{}, nil
 	}
 
+	// This shape maps to https://github.com/goliatone/go-auth/blob/186f6311bbc059b2b602bf900df442e3cf0dbc64/ctx.go#L18-L28
 	var target struct {
 		ActorID        string            `mapstructure:"actor_id"`
 		Subject        string            `mapstructure:"subject"`
