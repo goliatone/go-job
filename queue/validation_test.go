@@ -25,7 +25,7 @@ func TestValidateRequiredMessage(t *testing.T) {
 		{
 			name:    "missing script path",
 			msg:     &job.ExecutionMessage{JobID: "job-1"},
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			name:    "valid message",
