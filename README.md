@@ -201,6 +201,44 @@ Under the hood, `TaskCommander` wraps a `job.Task`, validates incoming `Executio
 - Required: `job_id` and `script_path`. TaskCommander/CompleteExecutionMessage will fill these from the task metadata, but if they remain empty the command fails fast with a validation error (text code `JOB_EXEC_MSG_INVALID`).
 - Defaults: `parameters` is normalized to an empty map, and `dedup_policy` defaults to `ignore` when unspecified so idempotency checks remain safe.
 
+### Queue Execution (Adapters + Worker)
+
+`go-job` ships with a durable queue runtime under `queue/`:
+
+- `queue` interfaces and storage contract (`queue.Storage`).
+- `queue/adapters/redis` and `queue/adapters/postgres` implementations.
+- `queue/worker` runtime with ack/nack, retries, DLQ, and cancellation hooks.
+- `queue/idempotency` shared idempotency stores for Redis/Postgres.
+
+Configuration sketch:
+
+```yaml
+queue:
+  backend: redis
+  visibility_timeout: 60s
+  dlq_enabled: true
+worker:
+  concurrency: 4
+  idle_delay: 100ms
+  retry:
+    max_attempts: 10
+    backoff: fixed
+    interval: 500ms
+```
+
+Minimal wiring:
+
+```go
+storage := queueRedis.NewStorage(redisClient, queueRedis.WithVisibilityTimeout(60*time.Second))
+adapter := queueRedis.NewAdapter(storage)
+
+worker := worker.NewWorker(adapter, worker.WithConcurrency(4))
+_ = worker.RegisterAll(tasks)
+_ = worker.Start(ctx)
+
+_ = adapter.Enqueue(ctx, msg)
+```
+
 ### Basic Example (Manual Execution)
 
 ```go
