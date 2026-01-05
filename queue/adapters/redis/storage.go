@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -128,7 +127,7 @@ func (s *Storage) Enqueue(ctx context.Context, msg *job.ExecutionMessage) error 
 		return err
 	}
 
-	payload, err := json.Marshal(msg)
+	payload, err := queue.EncodeExecutionMessage(msg)
 	if err != nil {
 		return err
 	}
@@ -176,8 +175,8 @@ func (s *Storage) Dequeue(ctx context.Context) (*job.ExecutionMessage, queue.Rec
 		return nil, queue.Receipt{}, fmt.Errorf("message payload missing for %q", id)
 	}
 
-	var msg job.ExecutionMessage
-	if err := json.Unmarshal([]byte(payload), &msg); err != nil {
+	msg, err := queue.DecodeExecutionMessage([]byte(payload))
+	if err != nil {
 		return nil, queue.Receipt{}, err
 	}
 
@@ -199,7 +198,7 @@ func (s *Storage) Dequeue(ctx context.Context) (*job.ExecutionMessage, queue.Rec
 		return nil, queue.Receipt{}, err
 	}
 
-	return &msg, queue.Receipt{
+	return msg, queue.Receipt{
 		ID:       id,
 		Token:    token,
 		Attempts: attempts,
