@@ -110,3 +110,75 @@ func TestEnvelopeSanitizerDoesNotMutateInputs(t *testing.T) {
 	assert.Equal(t, true, decoded.Params["sanitized"])
 	assert.Equal(t, "value", decoded.Params["keep"])
 }
+
+func TestJSONEnvelopeCodecCustomEnvelope(t *testing.T) {
+	params := map[string]any{
+		"keep":   "value",
+		"secret": "drop",
+	}
+
+	sanitizer := func(in map[string]any) map[string]any {
+		delete(in, "secret")
+		return in
+	}
+
+	codec := job.NewJSONEnvelopeCodec(job.WithEnvelopeSanitizer(sanitizer))
+	env := customEnvelope{
+		Actor:          map[string]any{"id": "user-1"},
+		Scope:          map[string]any{"tenant": "t1"},
+		Params:         params,
+		IdempotencyKey: "custom-key",
+	}
+
+	payload, err := codec.Encode(env)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{
+		"keep":   "value",
+		"secret": "drop",
+	}, params)
+
+	var decoded customEnvelope
+	require.NoError(t, codec.Decode(payload, &decoded))
+	assert.NotContains(t, decoded.Params, "secret")
+	assert.Equal(t, "value", decoded.Params["keep"])
+	assert.Equal(t, len(payload), decoded.RawBytes)
+	assert.Equal(t, "custom-key", decoded.IdempotencyKey)
+}
+
+type customEnvelope struct {
+	Actor          any            `json:"actor,omitempty"`
+	Scope          any            `json:"scope,omitempty"`
+	Params         map[string]any `json:"params,omitempty"`
+	IdempotencyKey string         `json:"idempotency_key,omitempty"`
+	RawBytes       int            `json:"-"`
+}
+
+func (e customEnvelope) EnvelopeActor() any {
+	return e.Actor
+}
+
+func (e customEnvelope) EnvelopeScope() any {
+	return e.Scope
+}
+
+func (e customEnvelope) EnvelopeIdempotencyKey() string {
+	return e.IdempotencyKey
+}
+
+func (e customEnvelope) EnvelopeParams() map[string]any {
+	return e.Params
+}
+
+func (e *customEnvelope) SetEnvelopeParams(params map[string]any) {
+	if e == nil {
+		return
+	}
+	e.Params = params
+}
+
+func (e *customEnvelope) SetEnvelopeRawContentBytes(size int) {
+	if e == nil {
+		return
+	}
+	e.RawBytes = size
+}
