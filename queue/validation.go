@@ -5,7 +5,7 @@ import (
 	job "github.com/goliatone/go-job"
 )
 
-// ValidateRequiredMessage enforces required ExecutionMessage fields.
+// ValidateRequiredMessage enforces required ExecutionMessage fields for queue usage.
 func ValidateRequiredMessage(msg *job.ExecutionMessage) error {
 	if msg == nil {
 		return errors.NewValidation("execution message required",
@@ -22,13 +22,6 @@ func ValidateRequiredMessage(msg *job.ExecutionMessage) error {
 			Field:   "job_id",
 			Message: "required",
 			Value:   msg.JobID,
-		})
-	}
-	if msg.ScriptPath == "" {
-		fieldErrors = append(fieldErrors, errors.FieldError{
-			Field:   "script_path",
-			Message: "required",
-			Value:   msg.ScriptPath,
 		})
 	}
 
