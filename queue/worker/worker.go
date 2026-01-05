@@ -387,6 +387,14 @@ func (w *Worker) handleDelivery(ctx context.Context, delivery queue.Delivery) {
 		w.emitSuccess(ctx, event)
 		return
 	}
+	if errors.Is(execErr, job.ErrIdempotentDrop) {
+		if err := delivery.Ack(ctx); err != nil {
+			w.logAckError(event, err)
+		}
+		w.logSuccess(event)
+		w.emitSuccess(ctx, event)
+		return
+	}
 
 	if cancelState.requested() {
 		opts := w.cancelNackOptions(cancelState.reason())
