@@ -20,6 +20,7 @@ const (
 	fieldAttempts  = "attempts"
 	fieldToken     = "token"
 	fieldLeasedAt  = "leased_at"
+	fieldAvailable = "available_at"
 	fieldCreatedAt = "created_at"
 	fieldUpdatedAt = "updated_at"
 	fieldLastError = "last_error"
@@ -120,6 +121,11 @@ func NewStorage(client Client, opts ...Option) *Storage {
 
 // Enqueue stores a message and enqueues it for delivery.
 func (s *Storage) Enqueue(ctx context.Context, msg *job.ExecutionMessage) error {
+	return s.EnqueueAt(ctx, msg, s.now())
+}
+
+// EnqueueAt stores a message and schedules it for delivery at the provided time.
+func (s *Storage) EnqueueAt(ctx context.Context, msg *job.ExecutionMessage, at time.Time) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis storage not configured")
 	}
@@ -139,13 +145,26 @@ func (s *Storage) Enqueue(ctx context.Context, msg *job.ExecutionMessage) error 
 		fieldPayload:   string(payload),
 		fieldAttempts:  "0",
 		fieldToken:     "",
+		fieldAvailable: strconv.FormatInt(at.UnixNano(), 10),
 		fieldCreatedAt: strconv.FormatInt(now, 10),
 		fieldUpdatedAt: strconv.FormatInt(now, 10),
 	}); err != nil {
 		return err
 	}
 
+	if at.After(s.now()) {
+		return s.client.ZAdd(ctx, s.keys.delayed(), float64(at.UnixNano()), id)
+	}
 	return s.client.LPush(ctx, s.keys.ready(), id)
+}
+
+// EnqueueAfter stores a message and schedules it after the provided delay.
+func (s *Storage) EnqueueAfter(ctx context.Context, msg *job.ExecutionMessage, delay time.Duration) error {
+	at := s.now()
+	if delay > 0 {
+		at = at.Add(delay)
+	}
+	return s.EnqueueAt(ctx, msg, at)
 }
 
 // Dequeue leases the next available message.
@@ -183,6 +202,17 @@ func (s *Storage) Dequeue(ctx context.Context) (*job.ExecutionMessage, queue.Rec
 	attempts := parseInt(fields[fieldAttempts]) + 1
 	token := s.tokenFunc()
 	now := s.now()
+	availableAt := parseInt64(fields[fieldAvailable])
+	createdAt := parseInt64(fields[fieldCreatedAt])
+	lastError := fields[fieldLastError]
+	var availableAtTime time.Time
+	if availableAt > 0 {
+		availableAtTime = time.Unix(0, availableAt).UTC()
+	}
+	var createdAtTime time.Time
+	if createdAt > 0 {
+		createdAtTime = time.Unix(0, createdAt).UTC()
+	}
 
 	if err := s.client.HSet(ctx, s.keys.message(id), map[string]string{
 		fieldAttempts:  strconv.Itoa(attempts),
@@ -199,10 +229,13 @@ func (s *Storage) Dequeue(ctx context.Context) (*job.ExecutionMessage, queue.Rec
 	}
 
 	return msg, queue.Receipt{
-		ID:       id,
-		Token:    token,
-		Attempts: attempts,
-		LeasedAt: now,
+		ID:          id,
+		Token:       token,
+		Attempts:    attempts,
+		LeasedAt:    now,
+		AvailableAt: availableAtTime,
+		CreatedAt:   createdAtTime,
+		LastError:   lastError,
 	}, nil
 }
 
@@ -261,14 +294,49 @@ func (s *Storage) Nack(ctx context.Context, receipt queue.Receipt, opts queue.Na
 	}
 
 	if opts.Requeue {
+		availableAt := now
 		if opts.Delay > 0 {
-			score := float64(now.Add(opts.Delay).UnixNano())
+			availableAt = now.Add(opts.Delay)
+			score := float64(availableAt.UnixNano())
+			update[fieldAvailable] = strconv.FormatInt(availableAt.UnixNano(), 10)
+			if err := s.client.HSet(ctx, s.keys.message(receipt.ID), update); err != nil {
+				return err
+			}
 			return s.client.ZAdd(ctx, s.keys.delayed(), score, receipt.ID)
+		}
+		update[fieldAvailable] = strconv.FormatInt(availableAt.UnixNano(), 10)
+		if err := s.client.HSet(ctx, s.keys.message(receipt.ID), update); err != nil {
+			return err
 		}
 		return s.client.LPush(ctx, s.keys.ready(), receipt.ID)
 	}
 
 	return s.client.Del(ctx, s.keys.message(receipt.ID))
+}
+
+// ExtendLease extends the in-flight lease for a delivery receipt.
+func (s *Storage) ExtendLease(ctx context.Context, receipt queue.Receipt, ttl time.Duration) error {
+	if s == nil || s.client == nil {
+		return fmt.Errorf("redis storage not configured")
+	}
+	if receipt.ID == "" {
+		return fmt.Errorf("receipt id required")
+	}
+	if err := s.ensureToken(ctx, receipt); err != nil {
+		return err
+	}
+	if ttl <= 0 {
+		ttl = s.visibilityTimeout
+	}
+	now := s.now()
+	until := now.Add(ttl).UnixNano()
+	if err := s.client.ZAdd(ctx, s.keys.inflight(), float64(until), receipt.ID); err != nil {
+		return err
+	}
+	return s.client.HSet(ctx, s.keys.message(receipt.ID), map[string]string{
+		fieldLeasedAt:  strconv.FormatInt(now.UnixNano(), 10),
+		fieldUpdatedAt: strconv.FormatInt(now.UnixNano(), 10),
+	})
 }
 
 func (s *Storage) releaseDue(ctx context.Context) error {
@@ -325,6 +393,17 @@ func parseInt(value string) int {
 		return 0
 	}
 	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0
+	}
+	return parsed
+}
+
+func parseInt64(value string) int64 {
+	if value == "" {
+		return 0
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
 		return 0
 	}

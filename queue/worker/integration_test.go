@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -11,6 +12,7 @@ import (
 	job "github.com/goliatone/go-job"
 	"github.com/goliatone/go-job/queue"
 	queueRedis "github.com/goliatone/go-job/queue/adapters/redis"
+	qidempotency "github.com/goliatone/go-job/queue/idempotency"
 	"github.com/stretchr/testify/require"
 )
 
@@ -144,6 +146,137 @@ func TestQueueIntegrationIdempotencyDropAcks(t *testing.T) {
 	require.Equal(t, 0, client.ListLen("queue:dlq"))
 }
 
+func TestQueueIntegrationSharedIdempotencyDropsDuplicateAcrossWorkers(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	clock := newManualClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	client := newFakeRedisClient()
+	storage := queueRedis.NewStorage(client,
+		queueRedis.WithClock(clock.Now),
+		queueRedis.WithVisibilityTimeout(5*time.Second),
+		queueRedis.WithIDFunc(sequence("msg-1", "msg-2")),
+		queueRedis.WithTokenFunc(sequence("token-1", "token-2")),
+	)
+	adapter := queueRedis.NewAdapter(storage)
+
+	store := newIntegrationIdempotencyStore()
+	var execCount int32
+	var successCount int32
+	task := &testTask{
+		id:   "export",
+		path: "/tmp/export",
+		exec: func(context.Context, *job.ExecutionMessage) error {
+			atomic.AddInt32(&execCount, 1)
+			return nil
+		},
+	}
+	hook := HookFuncs{
+		OnSuccessFunc: func(context.Context, Event) {
+			atomic.AddInt32(&successCount, 1)
+		},
+	}
+
+	workerA := NewWorker(adapter,
+		WithConcurrency(1),
+		WithIdleDelay(0),
+		WithHooks(hook),
+		WithIdempotencyStore(store, time.Minute),
+	)
+	workerB := NewWorker(adapter,
+		WithConcurrency(1),
+		WithIdleDelay(0),
+		WithHooks(hook),
+		WithIdempotencyStore(store, time.Minute),
+	)
+	require.NoError(t, workerA.Register(task))
+	require.NoError(t, workerB.Register(task))
+	require.NoError(t, workerA.Start(ctx))
+	require.NoError(t, workerB.Start(ctx))
+	t.Cleanup(func() {
+		_ = workerA.Stop(context.Background())
+		_ = workerB.Stop(context.Background())
+	})
+
+	msg := &job.ExecutionMessage{
+		JobID:          task.id,
+		ScriptPath:     task.path,
+		IdempotencyKey: "shared-dup",
+		DedupPolicy:    job.DedupPolicyDrop,
+	}
+	require.NoError(t, adapter.Enqueue(ctx, msg))
+	require.NoError(t, adapter.Enqueue(ctx, msg))
+
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&successCount) == 2
+	}, 2*time.Second, 10*time.Millisecond)
+	require.Equal(t, int32(1), atomic.LoadInt32(&execCount))
+}
+
+func TestQueueIntegrationManualReplayDropsWithSharedIdempotency(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	clock := newManualClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	client := newFakeRedisClient()
+	storage := queueRedis.NewStorage(client,
+		queueRedis.WithClock(clock.Now),
+		queueRedis.WithVisibilityTimeout(5*time.Second),
+		queueRedis.WithIDFunc(sequence("msg-1", "msg-2")),
+		queueRedis.WithTokenFunc(sequence("token-1", "token-2")),
+	)
+	adapter := queueRedis.NewAdapter(storage)
+
+	store := newIntegrationIdempotencyStore()
+	var execCount int32
+	var successCount int32
+	task := &testTask{
+		id:   "export",
+		path: "/tmp/export",
+		exec: func(context.Context, *job.ExecutionMessage) error {
+			atomic.AddInt32(&execCount, 1)
+			return nil
+		},
+	}
+	hook := HookFuncs{
+		OnSuccessFunc: func(context.Context, Event) {
+			atomic.AddInt32(&successCount, 1)
+		},
+	}
+
+	worker := NewWorker(adapter,
+		WithConcurrency(1),
+		WithIdleDelay(0),
+		WithHooks(hook),
+		WithIdempotencyStore(store, time.Minute),
+	)
+	require.NoError(t, worker.Register(task))
+	require.NoError(t, worker.Start(ctx))
+	t.Cleanup(func() {
+		_ = worker.Stop(context.Background())
+	})
+
+	msg := &job.ExecutionMessage{
+		JobID:          task.id,
+		ScriptPath:     task.path,
+		IdempotencyKey: "manual-replay",
+		DedupPolicy:    job.DedupPolicyDrop,
+	}
+	require.NoError(t, adapter.Enqueue(ctx, msg))
+
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&successCount) == 1
+	}, 2*time.Second, 10*time.Millisecond)
+	require.Equal(t, int32(1), atomic.LoadInt32(&execCount))
+
+	require.NoError(t, adapter.Enqueue(ctx, msg))
+
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&successCount) == 2
+	}, 2*time.Second, 10*time.Millisecond)
+	require.Equal(t, int32(1), atomic.LoadInt32(&execCount))
+}
+
 func TestQueueIntegrationRetryAndDLQ(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -211,6 +344,62 @@ func TestQueueIntegrationRetryAndDLQ(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return client.ListLen("queue:dlq") == 1
 	}, 2*time.Second, 10*time.Millisecond)
+}
+
+func TestQueueIntegrationStaleResumeTerminalErrorGoesToDLQWithoutRetry(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	clock := newManualClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	client := newFakeRedisClient()
+	storage := queueRedis.NewStorage(client,
+		queueRedis.WithClock(clock.Now),
+		queueRedis.WithVisibilityTimeout(5*time.Second),
+		queueRedis.WithIDFunc(sequence("msg-1")),
+		queueRedis.WithTokenFunc(sequence("token-1")),
+	)
+	adapter := queueRedis.NewAdapter(storage)
+
+	var attempts int32
+	task := &testTask{
+		id:   "export",
+		path: "/tmp/export",
+		exec: func(context.Context, *job.ExecutionMessage) error {
+			atomic.AddInt32(&attempts, 1)
+			return job.NewTerminalError(
+				job.TerminalErrorCodeStaleStateMismatch,
+				"stale resume expected version mismatch",
+				errors.New("version mismatch"),
+			)
+		},
+	}
+
+	policy := DefaultRetryPolicy{
+		MaxAttempts: 5,
+		Backoff: BackoffConfig{
+			Strategy: BackoffFixed,
+			Interval: 5 * time.Second,
+		},
+	}
+
+	worker := NewWorker(adapter,
+		WithConcurrency(1),
+		WithIdleDelay(0),
+		WithRetryPolicy(policy),
+	)
+	require.NoError(t, worker.Register(task))
+	require.NoError(t, worker.Start(ctx))
+	t.Cleanup(func() {
+		_ = worker.Stop(context.Background())
+	})
+
+	require.NoError(t, adapter.Enqueue(ctx, &job.ExecutionMessage{JobID: task.id, ScriptPath: task.path}))
+
+	require.Eventually(t, func() bool {
+		return client.ListLen("queue:dlq") == 1
+	}, 2*time.Second, 10*time.Millisecond)
+	require.Equal(t, int32(1), atomic.LoadInt32(&attempts))
+	require.Equal(t, 0, client.ZSetLen("queue:delayed"))
 }
 
 type trackingTask struct {
@@ -491,16 +680,91 @@ func sortZItems(items []queueRedis.ZItem) {
 }
 
 func sequence(values ...string) func() string {
-	index := 0
+	var index atomic.Int64
 	return func() string {
-		if index >= len(values) {
+		i := int(index.Add(1) - 1)
+		if i >= len(values) {
 			return ""
 		}
-		value := values[index]
-		index++
+		value := values[i]
 		return value
 	}
 }
 
+type integrationIdempotencyStore struct {
+	mu      sync.Mutex
+	records map[string]qidempotency.Record
+}
+
+func newIntegrationIdempotencyStore() *integrationIdempotencyStore {
+	return &integrationIdempotencyStore{
+		records: make(map[string]qidempotency.Record),
+	}
+}
+
+func (s *integrationIdempotencyStore) Acquire(_ context.Context, key string, ttl time.Duration) (qidempotency.Record, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	if record, ok := s.records[key]; ok && !qidempotency.IsExpired(record, now) {
+		return record, false, nil
+	}
+	record := qidempotency.Record{
+		Key:       key,
+		Status:    qidempotency.StatusPending,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if ttl > 0 {
+		record.ExpiresAt = now.Add(ttl)
+	}
+	s.records[key] = record
+	return record, true, nil
+}
+
+func (s *integrationIdempotencyStore) Get(_ context.Context, key string) (qidempotency.Record, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.records[key]
+	if !ok || qidempotency.IsExpired(record, time.Now().UTC()) {
+		return qidempotency.Record{}, false, nil
+	}
+	return record, true, nil
+}
+
+func (s *integrationIdempotencyStore) Update(_ context.Context, key string, update qidempotency.Update) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.records[key]
+	if !ok {
+		return qidempotency.ErrNotFound
+	}
+	if update.Status != nil {
+		record.Status = qidempotency.DefaultStatus(*update.Status)
+	}
+	if update.Payload != nil {
+		payload := *update.Payload
+		if len(payload) == 0 {
+			record.Payload = nil
+		} else {
+			record.Payload = append([]byte(nil), payload...)
+		}
+	}
+	if update.ExpiresAt != nil {
+		record.ExpiresAt = *update.ExpiresAt
+	}
+	record.UpdatedAt = time.Now().UTC()
+	s.records[key] = record
+	return nil
+}
+
+func (s *integrationIdempotencyStore) Delete(_ context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.records, key)
+	return nil
+}
+
 var _ queueRedis.Client = (*fakeRedisClient)(nil)
 var _ queue.Dequeuer = (*queueRedis.Adapter)(nil)
+var _ qidempotency.Store = (*integrationIdempotencyStore)(nil)

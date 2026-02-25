@@ -161,6 +161,11 @@ func (s *Storage) Cleanup(ctx context.Context) error {
 
 // Enqueue stores the message for delivery.
 func (s *Storage) Enqueue(ctx context.Context, msg *job.ExecutionMessage) error {
+	return s.EnqueueAt(ctx, msg, s.now())
+}
+
+// EnqueueAt stores a message for delivery at the given time.
+func (s *Storage) EnqueueAt(ctx context.Context, msg *job.ExecutionMessage, at time.Time) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("postgres storage not configured")
 	}
@@ -174,13 +179,23 @@ func (s *Storage) Enqueue(ctx context.Context, msg *job.ExecutionMessage) error 
 	}
 
 	now := s.now().UnixNano()
+	availableAt := at.UnixNano()
 	id := s.idFunc()
 	p := s.placeholder
 	query := fmt.Sprintf(`INSERT INTO %s
 (id, payload, attempts, available_at, leased_until, token, created_at, updated_at)
 VALUES (%s, %s, 0, %s, 0, '', %s, %s)`, s.table, p(1), p(2), p(3), p(4), p(5))
-	_, err = s.db.ExecContext(ctx, query, id, string(payload), now, now, now)
+	_, err = s.db.ExecContext(ctx, query, id, string(payload), availableAt, now, now)
 	return err
+}
+
+// EnqueueAfter stores a message for delivery after the provided delay.
+func (s *Storage) EnqueueAfter(ctx context.Context, msg *job.ExecutionMessage, delay time.Duration) error {
+	at := s.now()
+	if delay > 0 {
+		at = at.Add(delay)
+	}
+	return s.EnqueueAt(ctx, msg, at)
 }
 
 // Dequeue leases the next available message.
@@ -264,6 +279,32 @@ func (s *Storage) Nack(ctx context.Context, receipt queue.Receipt, opts queue.Na
 	return tx.Commit()
 }
 
+// ExtendLease extends a delivery lease for long-running handlers.
+func (s *Storage) ExtendLease(ctx context.Context, receipt queue.Receipt, ttl time.Duration) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("postgres storage not configured")
+	}
+	if receipt.ID == "" || receipt.Token == "" {
+		return fmt.Errorf("receipt id and token required")
+	}
+	if ttl <= 0 {
+		ttl = s.visibilityTimeout
+	}
+	now := s.now()
+	leaseUntil := now.Add(ttl).UnixNano()
+	p := s.placeholder
+	query := fmt.Sprintf(`UPDATE %s SET leased_until = %s, updated_at = %s WHERE id = %s AND token = %s`, s.table, p(1), p(2), p(3), p(4))
+	res, err := s.db.ExecContext(ctx, query, leaseUntil, now.UnixNano(), receipt.ID, receipt.Token)
+	if err != nil {
+		return err
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		return fmt.Errorf("receipt token mismatch for %q", receipt.ID)
+	}
+	return nil
+}
+
 func (s *Storage) dequeueSkipLocked(ctx context.Context) (*job.ExecutionMessage, queue.Receipt, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -274,7 +315,7 @@ func (s *Storage) dequeueSkipLocked(ctx context.Context) (*job.ExecutionMessage,
 	now := s.now()
 	nowUnix := now.UnixNano()
 	p := s.placeholder
-	query := fmt.Sprintf(`SELECT id, payload, attempts
+	query := fmt.Sprintf(`SELECT id, payload, attempts, available_at, created_at, last_error
 FROM %s
 WHERE available_at <= %s AND (leased_until = 0 OR leased_until <= %s)
 ORDER BY available_at ASC, created_at ASC
@@ -285,7 +326,10 @@ LIMIT 1`, s.table, p(1), p(2))
 	var id string
 	var payload string
 	var attempts int
-	if err := row.Scan(&id, &payload, &attempts); err != nil {
+	var availableAt int64
+	var createdAt int64
+	var lastError sql.NullString
+	if err := row.Scan(&id, &payload, &attempts, &availableAt, &createdAt, &lastError); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, queue.Receipt{}, tx.Commit()
 		}
@@ -311,10 +355,13 @@ LIMIT 1`, s.table, p(1), p(2))
 	}
 
 	return msg, queue.Receipt{
-		ID:       id,
-		Token:    token,
-		Attempts: attempts,
-		LeasedAt: now,
+		ID:          id,
+		Token:       token,
+		Attempts:    attempts,
+		LeasedAt:    now,
+		AvailableAt: unixNanoTime(availableAt),
+		CreatedAt:   unixNanoTime(createdAt),
+		LastError:   lastError.String,
 	}, nil
 }
 
@@ -328,7 +375,7 @@ func (s *Storage) dequeueCompatible(ctx context.Context) (*job.ExecutionMessage,
 	now := s.now()
 	nowUnix := now.UnixNano()
 	p := s.placeholder
-	query := fmt.Sprintf(`SELECT id, payload, attempts
+	query := fmt.Sprintf(`SELECT id, payload, attempts, available_at, created_at, last_error
 FROM %s
 WHERE available_at <= %s AND (leased_until = 0 OR leased_until <= %s)
 ORDER BY available_at ASC, created_at ASC
@@ -338,7 +385,10 @@ LIMIT 1`, s.table, p(1), p(2))
 	var id string
 	var payload string
 	var attempts int
-	if err := row.Scan(&id, &payload, &attempts); err != nil {
+	var availableAt int64
+	var createdAt int64
+	var lastError sql.NullString
+	if err := row.Scan(&id, &payload, &attempts, &availableAt, &createdAt, &lastError); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, queue.Receipt{}, tx.Commit()
 		}
@@ -370,10 +420,13 @@ WHERE id = %s AND (leased_until = 0 OR leased_until <= %s)`, s.table, p(1), p(2)
 	}
 
 	return msg, queue.Receipt{
-		ID:       id,
-		Token:    token,
-		Attempts: attempts,
-		LeasedAt: now,
+		ID:          id,
+		Token:       token,
+		Attempts:    attempts,
+		LeasedAt:    now,
+		AvailableAt: unixNanoTime(availableAt),
+		CreatedAt:   unixNanoTime(createdAt),
+		LastError:   lastError.String,
 	}, nil
 }
 
@@ -444,6 +497,13 @@ func rollback(tx *sql.Tx) {
 		return
 	}
 	_ = tx.Rollback()
+}
+
+func unixNanoTime(ts int64) time.Time {
+	if ts <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, ts).UTC()
 }
 
 func randomHex(size int) string {

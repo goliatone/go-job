@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -285,6 +286,193 @@ func TestWorkerCancelsDuringExecution(t *testing.T) {
 	assert.Equal(t, "timeout", opts.Reason)
 }
 
+func TestWorkerLeaseHeartbeatExtendsDuringExecution(t *testing.T) {
+	dequeuer := &fakeDequeuer{deliveries: make(chan queue.Delivery, 1)}
+	ackCh := make(chan struct{}, 1)
+	delivery := &fakeDelivery{
+		msg:      &job.ExecutionMessage{JobID: "job", ScriptPath: "/tmp/job"},
+		attempts: 1,
+		ackCh:    ackCh,
+	}
+	dequeuer.deliveries <- delivery
+
+	task := &testTask{
+		id:   "job",
+		path: "/tmp/job",
+		exec: func(context.Context, *job.ExecutionMessage) error {
+			time.Sleep(30 * time.Millisecond)
+			return nil
+		},
+	}
+
+	worker := NewWorker(dequeuer,
+		WithConcurrency(1),
+		WithIdleDelay(0),
+		WithLeaseHeartbeatInterval(5*time.Millisecond),
+		WithLeaseExtensionTTL(25*time.Millisecond),
+	)
+	require.NoError(t, worker.Register(task))
+	require.NoError(t, worker.Start(context.Background()))
+
+	select {
+	case <-ackCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for ack")
+	}
+
+	require.NoError(t, worker.Stop(context.Background()))
+	assert.Greater(t, atomic.LoadInt32(&delivery.extended), int32(0))
+}
+
+func TestWorkerHookIncludesCorrelationMetadata(t *testing.T) {
+	dequeuer := &fakeDequeuer{deliveries: make(chan queue.Delivery, 1)}
+	ackCh := make(chan struct{}, 1)
+	delivery := &fakeDelivery{
+		msg: &job.ExecutionMessage{
+			JobID:           "job",
+			ScriptPath:      "/tmp/job",
+			MachineID:       "machine-1",
+			EntityID:        "entity-1",
+			ExecutionID:     "exec-1",
+			ExpectedState:   "pending",
+			ExpectedVersion: 3,
+			ResumeEvent:     "resume.timeout",
+		},
+		attempts: 1,
+		ackCh:    ackCh,
+	}
+	dequeuer.deliveries <- delivery
+
+	var observed Correlation
+	hook := HookFuncs{
+		OnStartFunc: func(_ context.Context, event Event) {
+			observed = event.Correlation
+		},
+	}
+
+	worker := NewWorker(dequeuer, WithConcurrency(1), WithIdleDelay(0), WithHooks(hook))
+	require.NoError(t, worker.Register(&testTask{id: "job", path: "/tmp/job"}))
+	require.NoError(t, worker.Start(context.Background()))
+
+	select {
+	case <-ackCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for ack")
+	}
+
+	require.NoError(t, worker.Stop(context.Background()))
+	assert.Equal(t, "machine-1", observed.MachineID)
+	assert.Equal(t, "entity-1", observed.EntityID)
+	assert.Equal(t, "exec-1", observed.ExecutionID)
+	assert.Equal(t, "pending", observed.ExpectedState)
+	assert.Equal(t, int64(3), observed.ExpectedVersion)
+	assert.Equal(t, "resume.timeout", observed.ResumeEvent)
+}
+
+func TestWorkerStatusPauseResumeStop(t *testing.T) {
+	dequeuer := &fakeDequeuer{deliveries: make(chan queue.Delivery, 1)}
+	worker := NewWorker(dequeuer, WithConcurrency(2), WithIdleDelay(0))
+	require.NoError(t, worker.Register(&testTask{id: "job", path: "/tmp/job"}))
+
+	initial := worker.Status()
+	assert.Equal(t, WorkerStatusStopped, initial.Status)
+	assert.False(t, initial.Running)
+	assert.False(t, initial.Paused)
+
+	require.NoError(t, worker.Start(context.Background()))
+	require.Eventually(t, func() bool {
+		return worker.Status().Status == WorkerStatusRunning
+	}, time.Second, 10*time.Millisecond)
+
+	require.NoError(t, worker.Pause())
+	require.Eventually(t, func() bool {
+		return worker.Status().Status == WorkerStatusPaused
+	}, time.Second, 10*time.Millisecond)
+
+	require.NoError(t, worker.Resume())
+	require.Eventually(t, func() bool {
+		return worker.Status().Status == WorkerStatusRunning
+	}, time.Second, 10*time.Millisecond)
+
+	require.NoError(t, worker.Stop(context.Background()))
+	stopped := worker.Status()
+	assert.Equal(t, WorkerStatusStopped, stopped.Status)
+	assert.False(t, stopped.Running)
+	assert.False(t, stopped.StoppedAt.IsZero())
+}
+
+func TestWorkerPauseBlocksDeliveryUntilResume(t *testing.T) {
+	dequeuer := &fakeDequeuer{deliveries: make(chan queue.Delivery, 1)}
+	ackCh := make(chan struct{}, 1)
+	delivery := &fakeDelivery{
+		msg:      &job.ExecutionMessage{JobID: "job", ScriptPath: "/tmp/job"},
+		attempts: 1,
+		ackCh:    ackCh,
+	}
+
+	worker := NewWorker(dequeuer, WithConcurrency(1), WithIdleDelay(0))
+	require.NoError(t, worker.Register(&testTask{id: "job", path: "/tmp/job"}))
+	require.NoError(t, worker.Start(context.Background()))
+	t.Cleanup(func() { _ = worker.Stop(context.Background()) })
+
+	require.NoError(t, worker.Pause())
+	require.Eventually(t, func() bool {
+		return worker.Status().Status == WorkerStatusPaused
+	}, time.Second, 10*time.Millisecond)
+
+	dequeuer.deliveries <- delivery
+
+	select {
+	case <-ackCh:
+		t.Fatal("delivery should not ack while worker is paused")
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	require.NoError(t, worker.Resume())
+	select {
+	case <-ackCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for ack after resume")
+	}
+}
+
+func TestWorkerDeadLettersTerminalStaleResumeError(t *testing.T) {
+	dequeuer := &fakeDequeuer{deliveries: make(chan queue.Delivery, 1)}
+	nackCh := make(chan queue.NackOptions, 1)
+	delivery := &fakeDelivery{
+		msg:      &job.ExecutionMessage{JobID: "job", ScriptPath: "/tmp/job"},
+		attempts: 1,
+		nackCh:   nackCh,
+	}
+	dequeuer.deliveries <- delivery
+
+	staleErr := job.NewTerminalError(job.TerminalErrorCodeStaleStateMismatch, "stale resume expected state mismatch", errors.New("version mismatch"))
+	task := &testTask{id: "job", path: "/tmp/job", err: staleErr}
+	policy := DefaultRetryPolicy{
+		MaxAttempts: 5,
+		Backoff: BackoffConfig{
+			Strategy: BackoffFixed,
+			Interval: 10 * time.Second,
+		},
+	}
+
+	worker := NewWorker(dequeuer, WithConcurrency(1), WithIdleDelay(0), WithRetryPolicy(policy))
+	require.NoError(t, worker.Register(task))
+	require.NoError(t, worker.Start(context.Background()))
+
+	var opts queue.NackOptions
+	select {
+	case opts = <-nackCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for nack")
+	}
+
+	require.NoError(t, worker.Stop(context.Background()))
+	assert.True(t, opts.DeadLetter)
+	assert.False(t, opts.Requeue)
+	assert.Equal(t, "stale resume expected state mismatch", opts.Reason)
+}
+
 type fakeDequeuer struct {
 	deliveries chan queue.Delivery
 }
@@ -306,6 +494,7 @@ type fakeDelivery struct {
 	attempts int
 	acked    int32
 	nacked   int32
+	extended int32
 	ackCh    chan struct{}
 	nackCh   chan queue.NackOptions
 }
@@ -338,6 +527,11 @@ func (d *fakeDelivery) Nack(_ context.Context, opts queue.NackOptions) error {
 
 func (d *fakeDelivery) Attempts() int {
 	return d.attempts
+}
+
+func (d *fakeDelivery) ExtendLease(context.Context, time.Duration) error {
+	atomic.AddInt32(&d.extended, 1)
+	return nil
 }
 
 type fakeCancelStore struct {

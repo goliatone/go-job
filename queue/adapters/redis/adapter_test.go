@@ -51,6 +51,7 @@ func TestStorageNackDelayedRetry(t *testing.T) {
 
 	_, receipt, err := storage.Dequeue(context.Background())
 	require.NoError(t, err)
+	require.False(t, receipt.CreatedAt.IsZero())
 
 	require.NoError(t, storage.Nack(context.Background(), receipt, queue.NackOptions{
 		Delay:   5 * time.Second,
@@ -68,6 +69,8 @@ func TestStorageNackDelayedRetry(t *testing.T) {
 	require.NotNil(t, out)
 	assert.Equal(t, 2, receipt.Attempts)
 	assert.Equal(t, "token-2", receipt.Token)
+	assert.Equal(t, "retry", receipt.LastError)
+	assert.Equal(t, clock.Now(), receipt.AvailableAt)
 }
 
 func TestStorageVisibilityTimeoutRequeues(t *testing.T) {
@@ -119,6 +122,60 @@ func TestStorageDeadLetters(t *testing.T) {
 	dlq := client.List(storage.keys.dlq())
 	require.Len(t, dlq, 1)
 	assert.Equal(t, receipt.ID, dlq[0])
+}
+
+func TestStorageEnqueueAt(t *testing.T) {
+	client := newFakeClient()
+	clock := newManualClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	storage := NewStorage(client,
+		WithClock(clock.Now),
+		WithVisibilityTimeout(10*time.Second),
+		WithIDFunc(sequence("msg-1")),
+		WithTokenFunc(sequence("token-1")),
+	)
+
+	msg := &job.ExecutionMessage{JobID: "export", ScriptPath: "/tmp/export"}
+	require.NoError(t, storage.EnqueueAt(context.Background(), msg, clock.Now().Add(10*time.Second)))
+
+	none, _, err := storage.Dequeue(context.Background())
+	require.NoError(t, err)
+	assert.Nil(t, none)
+
+	clock.Advance(10 * time.Second)
+	out, _, err := storage.Dequeue(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, out)
+	assert.Equal(t, "export", out.JobID)
+}
+
+func TestStorageExtendLease(t *testing.T) {
+	client := newFakeClient()
+	clock := newManualClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	storage := NewStorage(client,
+		WithClock(clock.Now),
+		WithVisibilityTimeout(2*time.Second),
+		WithIDFunc(sequence("msg-1")),
+		WithTokenFunc(sequence("token-1", "token-2")),
+	)
+
+	msg := &job.ExecutionMessage{JobID: "export", ScriptPath: "/tmp/export"}
+	require.NoError(t, storage.Enqueue(context.Background(), msg))
+
+	_, receipt, err := storage.Dequeue(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, storage.ExtendLease(context.Background(), receipt, 10*time.Second))
+
+	clock.Advance(3 * time.Second)
+	none, _, err := storage.Dequeue(context.Background())
+	require.NoError(t, err)
+	assert.Nil(t, none)
+
+	clock.Advance(8 * time.Second)
+	out, next, err := storage.Dequeue(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, out)
+	assert.Equal(t, 2, next.Attempts)
+	assert.Equal(t, "token-2", next.Token)
 }
 
 type manualClock struct {

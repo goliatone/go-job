@@ -8,16 +8,27 @@ import (
 	"github.com/goliatone/go-job/queue"
 )
 
+// Correlation captures canonical FSM metadata for observability hooks.
+type Correlation struct {
+	MachineID       string
+	EntityID        string
+	ExecutionID     string
+	ExpectedState   string
+	ExpectedVersion int64
+	ResumeEvent     string
+}
+
 // Event captures worker lifecycle details for hooks.
 type Event struct {
-	Delivery  queue.Delivery
-	Message   *job.ExecutionMessage
-	Task      job.Task
-	Attempt   int
-	Delay     time.Duration
-	Err       error
-	StartedAt time.Time
-	Duration  time.Duration
+	Delivery    queue.Delivery
+	Message     *job.ExecutionMessage
+	Task        job.Task
+	Correlation Correlation
+	Attempt     int
+	Delay       time.Duration
+	Err         error
+	StartedAt   time.Time
+	Duration    time.Duration
 }
 
 // Hook exposes lifecycle callbacks for worker execution.

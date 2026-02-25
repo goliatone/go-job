@@ -10,12 +10,15 @@ import (
 	job "github.com/goliatone/go-job"
 	"github.com/goliatone/go-job/queue"
 	"github.com/goliatone/go-job/queue/cancellation"
+	qidempotency "github.com/goliatone/go-job/queue/idempotency"
 )
 
 const (
-	defaultConcurrency = 1
-	defaultIdleDelay   = 100 * time.Millisecond
-	defaultCancelPoll  = 250 * time.Millisecond
+	defaultConcurrency            = 1
+	defaultIdleDelay              = 100 * time.Millisecond
+	defaultCancelPoll             = 250 * time.Millisecond
+	defaultLeaseHeartbeatInterval = 15 * time.Second
+	defaultLeaseExtensionTTL      = 60 * time.Second
 )
 
 // ShutdownHook runs during worker shutdown.
@@ -133,38 +136,77 @@ func WithCancelPollInterval(interval time.Duration) Option {
 	}
 }
 
+// WithLeaseHeartbeatInterval sets the cadence for lease renewal heartbeats.
+func WithLeaseHeartbeatInterval(interval time.Duration) Option {
+	return func(w *Worker) {
+		if interval >= 0 {
+			w.leaseHeartbeatInterval = interval
+		}
+	}
+}
+
+// WithLeaseExtensionTTL sets the lease extension duration used by heartbeats.
+func WithLeaseExtensionTTL(ttl time.Duration) Option {
+	return func(w *Worker) {
+		if ttl >= 0 {
+			w.leaseExtensionTTL = ttl
+		}
+	}
+}
+
+// WithIdempotencyStore configures distributed deduplication across workers.
+func WithIdempotencyStore(store qidempotency.Store, ttl time.Duration) Option {
+	return func(w *Worker) {
+		w.idempotencyStore = store
+		if ttl > 0 {
+			w.idempotencyTTL = ttl
+		}
+	}
+}
+
 // Worker consumes queue deliveries and dispatches tasks.
 type Worker struct {
-	dequeuer         queue.Dequeuer
-	registry         *Registry
-	concurrency      int
-	idleDelay        time.Duration
-	logger           job.Logger
-	hooks            []Hook
-	retryPolicy      RetryPolicy
-	commanderFactory CommanderFactory
-	commanderRetries bool
-	shutdownHooks    []ShutdownHook
-	cancelStore      cancellation.Store
-	cancelKeyFn      func(*job.ExecutionMessage) string
-	cancelPoll       time.Duration
-	mu               sync.Mutex
-	wg               sync.WaitGroup
-	running          bool
-	cancel           context.CancelFunc
+	dequeuer               queue.Dequeuer
+	registry               *Registry
+	concurrency            int
+	idleDelay              time.Duration
+	logger                 job.Logger
+	hooks                  []Hook
+	retryPolicy            RetryPolicy
+	commanderFactory       CommanderFactory
+	commanderRetries       bool
+	shutdownHooks          []ShutdownHook
+	cancelStore            cancellation.Store
+	cancelKeyFn            func(*job.ExecutionMessage) string
+	cancelPoll             time.Duration
+	leaseHeartbeatInterval time.Duration
+	leaseExtensionTTL      time.Duration
+	idempotencyStore       qidempotency.Store
+	idempotencyTTL         time.Duration
+	mu                     sync.Mutex
+	wg                     sync.WaitGroup
+	running                bool
+	paused                 bool
+	resumeCh               chan struct{}
+	startedAt              time.Time
+	stoppedAt              time.Time
+	cancel                 context.CancelFunc
 }
 
 // NewWorker builds a worker with default settings.
 func NewWorker(dequeuer queue.Dequeuer, opts ...Option) *Worker {
 	loggerProvider := job.NewStdLoggerProvider()
 	w := &Worker{
-		dequeuer:    dequeuer,
-		registry:    NewRegistry(),
-		concurrency: defaultConcurrency,
-		idleDelay:   defaultIdleDelay,
-		cancelPoll:  defaultCancelPoll,
-		logger:      loggerProvider.GetLogger("queue:worker"),
-		retryPolicy: DefaultRetryPolicy{MaxAttempts: 1},
+		dequeuer:               dequeuer,
+		registry:               NewRegistry(),
+		concurrency:            defaultConcurrency,
+		idleDelay:              defaultIdleDelay,
+		cancelPoll:             defaultCancelPoll,
+		leaseHeartbeatInterval: defaultLeaseHeartbeatInterval,
+		leaseExtensionTTL:      defaultLeaseExtensionTTL,
+		idempotencyTTL:         24 * time.Hour,
+		logger:                 loggerProvider.GetLogger("queue:worker"),
+		retryPolicy:            DefaultRetryPolicy{MaxAttempts: 1},
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -234,6 +276,10 @@ func (w *Worker) Start(ctx context.Context) error {
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	w.running = true
+	w.paused = false
+	w.resumeCh = nil
+	w.startedAt = time.Now().UTC()
+	w.stoppedAt = time.Time{}
 	w.cancel = cancel
 	w.mu.Unlock()
 
@@ -260,6 +306,12 @@ func (w *Worker) Stop(ctx context.Context) error {
 	}
 	cancel := w.cancel
 	w.running = false
+	w.paused = false
+	if w.resumeCh != nil {
+		close(w.resumeCh)
+		w.resumeCh = nil
+	}
+	w.stoppedAt = time.Now().UTC()
 	w.cancel = nil
 	w.mu.Unlock()
 
@@ -286,6 +338,9 @@ func (w *Worker) run(ctx context.Context) {
 	defer w.wg.Done()
 
 	for {
+		if err := w.waitIfPaused(ctx); err != nil {
+			return
+		}
 		if ctx.Err() != nil {
 			return
 		}
@@ -304,6 +359,9 @@ func (w *Worker) run(ctx context.Context) {
 			w.waitIdle(ctx)
 			continue
 		}
+		if err := w.waitIfPaused(ctx); err != nil {
+			return
+		}
 
 		w.handleDelivery(ctx, delivery)
 	}
@@ -313,10 +371,11 @@ func (w *Worker) handleDelivery(ctx context.Context, delivery queue.Delivery) {
 	started := time.Now()
 	msg := delivery.Message()
 	event := Event{
-		Delivery:  delivery,
-		Message:   msg,
-		Attempt:   deliveryAttempts(delivery),
-		StartedAt: started,
+		Delivery:    delivery,
+		Message:     msg,
+		Correlation: correlationFromMessage(msg),
+		Attempt:     deliveryAttempts(delivery),
+		StartedAt:   started,
 	}
 
 	w.logStart(event)
@@ -375,6 +434,9 @@ func (w *Worker) handleDelivery(ctx context.Context, delivery queue.Delivery) {
 		execCtx, cancel = context.WithCancel(ctx)
 		defer cancel()
 		go w.monitorCancellation(execCtx, cancelKey, cancelState, cancel)
+	}
+	if stopHeartbeat := w.startLeaseHeartbeat(execCtx, event, delivery); stopHeartbeat != nil {
+		defer stopHeartbeat()
 	}
 
 	execErr := commander.Execute(execCtx, msg)
@@ -449,6 +511,9 @@ func (w *Worker) buildCommander(task job.Task) *job.TaskCommander {
 		return w.commanderFactory(task)
 	}
 	commander := job.NewTaskCommander(task)
+	if w.idempotencyStore != nil {
+		commander.WithSharedIdempotencyStore(w.idempotencyStore, w.idempotencyTTL)
+	}
 	if !w.commanderRetries {
 		commander.WithRetryOverride(0)
 	}
@@ -496,7 +561,9 @@ func (w *Worker) logStart(event Event) {
 		return
 	}
 	jobID, scriptPath := eventMessageFields(event)
-	w.logger.Debug("queue delivery started", "job_id", jobID, "script_path", scriptPath, "attempt", event.Attempt)
+	args := []any{"job_id", jobID, "script_path", scriptPath, "attempt", event.Attempt}
+	args = append(args, eventCorrelationArgs(event)...)
+	w.logger.Debug("queue delivery started", args...)
 }
 
 func (w *Worker) logSuccess(event Event) {
@@ -504,7 +571,9 @@ func (w *Worker) logSuccess(event Event) {
 		return
 	}
 	jobID, scriptPath := eventMessageFields(event)
-	w.logger.Info("queue delivery succeeded", "job_id", jobID, "script_path", scriptPath, "attempt", event.Attempt, "duration", event.Duration)
+	args := []any{"job_id", jobID, "script_path", scriptPath, "attempt", event.Attempt, "duration", event.Duration}
+	args = append(args, eventCorrelationArgs(event)...)
+	w.logger.Info("queue delivery succeeded", args...)
 }
 
 func (w *Worker) logFailure(event Event) {
@@ -512,7 +581,9 @@ func (w *Worker) logFailure(event Event) {
 		return
 	}
 	jobID, scriptPath := eventMessageFields(event)
-	w.logger.Error("queue delivery failed", "job_id", jobID, "script_path", scriptPath, "attempt", event.Attempt, "duration", event.Duration, "error", event.Err)
+	args := []any{"job_id", jobID, "script_path", scriptPath, "attempt", event.Attempt, "duration", event.Duration, "error", event.Err}
+	args = append(args, eventCorrelationArgs(event)...)
+	w.logger.Error("queue delivery failed", args...)
 }
 
 func (w *Worker) logRetry(event Event) {
@@ -520,7 +591,9 @@ func (w *Worker) logRetry(event Event) {
 		return
 	}
 	jobID, scriptPath := eventMessageFields(event)
-	w.logger.Warn("queue delivery retry scheduled", "job_id", jobID, "script_path", scriptPath, "attempt", event.Attempt, "delay", event.Delay, "error", event.Err)
+	args := []any{"job_id", jobID, "script_path", scriptPath, "attempt", event.Attempt, "delay", event.Delay, "error", event.Err}
+	args = append(args, eventCorrelationArgs(event)...)
+	w.logger.Warn("queue delivery retry scheduled", args...)
 }
 
 func (w *Worker) logDequeuerError(err error) {
@@ -535,7 +608,9 @@ func (w *Worker) logAckError(event Event, err error) {
 		return
 	}
 	jobID, scriptPath := eventMessageFields(event)
-	w.logger.Error("queue delivery ack failed", "job_id", jobID, "script_path", scriptPath, "error", err)
+	args := []any{"job_id", jobID, "script_path", scriptPath, "error", err}
+	args = append(args, eventCorrelationArgs(event)...)
+	w.logger.Error("queue delivery ack failed", args...)
 }
 
 func (w *Worker) logNackError(event Event, err error) {
@@ -543,7 +618,9 @@ func (w *Worker) logNackError(event Event, err error) {
 		return
 	}
 	jobID, scriptPath := eventMessageFields(event)
-	w.logger.Error("queue delivery nack failed", "job_id", jobID, "script_path", scriptPath, "error", err)
+	args := []any{"job_id", jobID, "script_path", scriptPath, "error", err}
+	args = append(args, eventCorrelationArgs(event)...)
+	w.logger.Error("queue delivery nack failed", args...)
 }
 
 func (w *Worker) logCancelCheckError(key string, err error) {
@@ -561,6 +638,91 @@ func eventMessageFields(event Event) (string, string) {
 		return event.Task.GetID(), event.Task.GetPath()
 	}
 	return "", ""
+}
+
+func correlationFromMessage(msg *job.ExecutionMessage) Correlation {
+	if msg == nil {
+		return Correlation{}
+	}
+	return Correlation{
+		MachineID:       msg.MachineID,
+		EntityID:        msg.EntityID,
+		ExecutionID:     msg.ExecutionID,
+		ExpectedState:   msg.ExpectedState,
+		ExpectedVersion: msg.ExpectedVersion,
+		ResumeEvent:     msg.ResumeEvent,
+	}
+}
+
+func eventCorrelationArgs(event Event) []any {
+	c := event.Correlation
+	var out []any
+	if c.MachineID != "" {
+		out = append(out, "machine_id", c.MachineID)
+	}
+	if c.EntityID != "" {
+		out = append(out, "entity_id", c.EntityID)
+	}
+	if c.ExecutionID != "" {
+		out = append(out, "execution_id", c.ExecutionID)
+	}
+	if c.ExpectedState != "" {
+		out = append(out, "expected_state", c.ExpectedState)
+	}
+	if c.ExpectedVersion != 0 {
+		out = append(out, "expected_version", c.ExpectedVersion)
+	}
+	if c.ResumeEvent != "" {
+		out = append(out, "resume_event", c.ResumeEvent)
+	}
+	return out
+}
+
+func (w *Worker) startLeaseHeartbeat(ctx context.Context, event Event, delivery queue.Delivery) context.CancelFunc {
+	if w == nil || delivery == nil || w.leaseHeartbeatInterval <= 0 {
+		return nil
+	}
+	extender, ok := delivery.(queue.LeaseExtender)
+	if !ok {
+		return nil
+	}
+	hbCtx, cancel := context.WithCancel(ctx)
+	go w.runLeaseHeartbeat(hbCtx, event, extender)
+	return cancel
+}
+
+func (w *Worker) runLeaseHeartbeat(ctx context.Context, event Event, extender queue.LeaseExtender) {
+	interval := w.leaseHeartbeatInterval
+	if interval <= 0 {
+		return
+	}
+	ttl := w.leaseExtensionTTL
+	if ttl <= 0 {
+		ttl = interval * 2
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := extender.ExtendLease(ctx, ttl); err != nil {
+				w.logLeaseExtendError(event, err)
+			}
+		}
+	}
+}
+
+func (w *Worker) logLeaseExtendError(event Event, err error) {
+	if w.logger == nil {
+		return
+	}
+	jobID, scriptPath := eventMessageFields(event)
+	args := []any{"job_id", jobID, "script_path", scriptPath, "error", err}
+	args = append(args, eventCorrelationArgs(event)...)
+	w.logger.Warn("queue lease extension failed", args...)
 }
 
 type deliveryAttemptsReader interface {

@@ -1,8 +1,10 @@
 package worker
 
 import (
+	"errors"
 	"time"
 
+	job "github.com/goliatone/go-job"
 	"github.com/goliatone/go-job/queue"
 )
 
@@ -53,6 +55,14 @@ func (p DefaultRetryPolicy) Decide(attempt int, err error) queue.NackOptions {
 	reason := ""
 	if err != nil {
 		reason = err.Error()
+	}
+	var terminal job.NonRetryableError
+	if errors.As(err, &terminal) && terminal.NonRetryable() {
+		reason = terminal.NonRetryableReason()
+		return queue.NackOptions{
+			DeadLetter: true,
+			Reason:     reason,
+		}
 	}
 
 	if attempt >= maxAttempts {

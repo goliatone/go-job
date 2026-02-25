@@ -64,6 +64,18 @@ _ = queuecmd.Enqueue(ctx, enqueuer, cmdReg, id, map[string]any{
 })
 ```
 
+Scheduled variants are also available:
+
+```go
+_ = queuecmd.EnqueueAt(ctx, enqueuer, cmdReg, id, map[string]any{
+	"export_id": "123",
+}, time.Now().Add(10*time.Minute))
+
+_ = queuecmd.EnqueueAfter(ctx, enqueuer, cmdReg, id, map[string]any{
+	"export_id": "123",
+}, 30*time.Second)
+```
+
 ## Parameter Decoding
 
 `ExecutionMessage.Parameters` is decoded into the command’s message type using
@@ -154,3 +166,5 @@ When present, the config is attached to the task and used by the worker.
 - `QueueResolver(reg *Registry) command.Resolver`
 - `RegisterAll(w *worker.Worker, reg *Registry, ids []string) error`
 - `Enqueue(ctx context.Context, enq queue.Enqueuer, reg *Registry, id string, params map[string]any) error`
+- `EnqueueAt(ctx context.Context, enq queue.ScheduledEnqueuer, reg *Registry, id string, params map[string]any, at time.Time) error`
+- `EnqueueAfter(ctx context.Context, enq queue.ScheduledEnqueuer, reg *Registry, id string, params map[string]any, delay time.Duration) error`
