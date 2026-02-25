@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"time"
 
 	job "github.com/goliatone/go-job"
 	"github.com/goliatone/go-job/queue"
@@ -24,6 +25,30 @@ func (a *Adapter) Enqueue(ctx context.Context, msg *job.ExecutionMessage) error 
 		return fmt.Errorf("queue adapter not configured")
 	}
 	return a.storage.Enqueue(ctx, msg)
+}
+
+// EnqueueAt forwards scheduled enqueue requests to storage when supported.
+func (a *Adapter) EnqueueAt(ctx context.Context, msg *job.ExecutionMessage, at time.Time) error {
+	if a == nil || a.storage == nil {
+		return fmt.Errorf("queue adapter not configured")
+	}
+	scheduler, ok := a.storage.(queue.ScheduledStorage)
+	if !ok {
+		return queue.ErrScheduledEnqueueUnsupported
+	}
+	return scheduler.EnqueueAt(ctx, msg, at)
+}
+
+// EnqueueAfter forwards delayed enqueue requests to storage when supported.
+func (a *Adapter) EnqueueAfter(ctx context.Context, msg *job.ExecutionMessage, delay time.Duration) error {
+	if a == nil || a.storage == nil {
+		return fmt.Errorf("queue adapter not configured")
+	}
+	scheduler, ok := a.storage.(queue.ScheduledStorage)
+	if !ok {
+		return queue.ErrScheduledEnqueueUnsupported
+	}
+	return scheduler.EnqueueAfter(ctx, msg, delay)
 }
 
 // Dequeue returns a delivery wrapper when available.
@@ -63,6 +88,17 @@ func (d *delivery) Nack(ctx context.Context, opts queue.NackOptions) error {
 		return fmt.Errorf("queue delivery not configured")
 	}
 	return d.storage.Nack(ctx, d.receipt, opts)
+}
+
+func (d *delivery) ExtendLease(ctx context.Context, ttl time.Duration) error {
+	if d == nil || d.storage == nil {
+		return fmt.Errorf("queue delivery not configured")
+	}
+	leaseStore, ok := d.storage.(queue.LeaseStorage)
+	if !ok {
+		return queue.ErrLeaseExtensionUnsupported
+	}
+	return leaseStore.ExtendLease(ctx, d.receipt, ttl)
 }
 
 func (d *delivery) Attempts() int {
