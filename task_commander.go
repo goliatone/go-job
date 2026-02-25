@@ -3,9 +3,11 @@ package job
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/goliatone/go-command/router"
 	"github.com/goliatone/go-errors"
+	qidempotency "github.com/goliatone/go-job/queue/idempotency"
 )
 
 type messageComposer interface {
@@ -71,6 +73,12 @@ func CompleteExecutionMessage(task Task, msg *ExecutionMessage) (*ExecutionMessa
 	if msg.ScriptPath != "" {
 		base.ScriptPath = msg.ScriptPath
 	}
+	base.MachineID = msg.MachineID
+	base.EntityID = msg.EntityID
+	base.ExecutionID = msg.ExecutionID
+	base.ExpectedState = msg.ExpectedState
+	base.ExpectedVersion = msg.ExpectedVersion
+	base.ResumeEvent = msg.ResumeEvent
 	if msg.IdempotencyKey != "" {
 		base.IdempotencyKey = msg.IdempotencyKey
 	}
@@ -100,20 +108,23 @@ func CompleteExecutionMessage(task Task, msg *ExecutionMessage) (*ExecutionMessa
 
 // TaskCommander adapts a Task to the command.Commander interface.
 type TaskCommander struct {
-	Task    Task
-	tracker *IdempotencyTracker
-	limiter *ConcurrencyLimiter
-	quotas  QuotaChecker
-	scope   func(*ExecutionMessage) string
-	retries *int
+	Task     Task
+	tracker  *IdempotencyTracker
+	store    qidempotency.Store
+	storeTTL time.Duration
+	limiter  *ConcurrencyLimiter
+	quotas   QuotaChecker
+	scope    func(*ExecutionMessage) string
+	retries  *int
 }
 
 func NewTaskCommander(task Task) *TaskCommander {
 	return &TaskCommander{
-		Task:    task,
-		tracker: defaultIdempotencyTracker,
-		limiter: defaultConcurrencyLimiter,
-		quotas:  defaultQuotaChecker,
+		Task:     task,
+		tracker:  defaultIdempotencyTracker,
+		storeTTL: 24 * time.Hour,
+		limiter:  defaultConcurrencyLimiter,
+		quotas:   defaultQuotaChecker,
 	}
 }
 
@@ -123,6 +134,18 @@ func (c *TaskCommander) WithIdempotencyTracker(tracker *IdempotencyTracker) *Tas
 		return nil
 	}
 	c.tracker = tracker
+	return c
+}
+
+// WithSharedIdempotencyStore enables distributed idempotency checks across workers.
+func (c *TaskCommander) WithSharedIdempotencyStore(store qidempotency.Store, ttl time.Duration) *TaskCommander {
+	if c == nil {
+		return nil
+	}
+	c.store = store
+	if ttl > 0 {
+		c.storeTTL = ttl
+	}
 	return c
 }
 
@@ -196,7 +219,10 @@ func (c *TaskCommander) Execute(ctx context.Context, msg *ExecutionMessage) erro
 			WithTextCode("JOB_EXEC_MSG_INVALID")
 	}
 
-	decision, prevErr := dedupBeforeExecute(c.tracker, finalMsg)
+	decision, prevErr, dedupErr := c.dedupBeforeExecute(ctx, finalMsg)
+	if dedupErr != nil {
+		return dedupErr
+	}
 	switch decision {
 	case dedupDrop:
 		return ErrIdempotentDrop
@@ -214,7 +240,7 @@ func (c *TaskCommander) Execute(ctx context.Context, msg *ExecutionMessage) erro
 	}
 	defer release()
 
-	defer dedupAfterExecute(c.tracker, finalMsg, &err)
+	defer c.dedupAfterExecute(ctx, finalMsg, &err)
 
 	maxRetries := finalMsg.Config.Retries
 	if c.retries != nil {
@@ -237,6 +263,78 @@ func (c *TaskCommander) Execute(ctx context.Context, msg *ExecutionMessage) erro
 			return sleepErr
 		}
 	}
+}
+
+func (c *TaskCommander) dedupBeforeExecute(ctx context.Context, msg *ExecutionMessage) (dedupDecision, error, error) {
+	if c == nil || c.store == nil {
+		decision, prevErr := dedupBeforeExecute(c.tracker, msg)
+		return decision, prevErr, nil
+	}
+	if msg == nil || msg.IdempotencyKey == "" || msg.DedupPolicy == "" || msg.DedupPolicy == DedupPolicyIgnore {
+		return dedupProceed, nil, nil
+	}
+
+	record, created, err := c.store.Acquire(ctx, msg.IdempotencyKey, c.idempotencyTTL())
+	if err != nil {
+		return dedupProceed, nil, err
+	}
+	if created {
+		return dedupProceed, nil, nil
+	}
+
+	switch msg.DedupPolicy {
+	case DedupPolicyDrop:
+		return dedupDrop, nil, nil
+	case DedupPolicyMerge:
+		if record.Status == qidempotency.StatusFailed && len(record.Payload) > 0 {
+			return dedupMerge, fmt.Errorf("%s", string(record.Payload)), nil
+		}
+		return dedupMerge, nil, nil
+	case DedupPolicyReplace:
+		status := qidempotency.StatusPending
+		emptyPayload := []byte(nil)
+		expiresAt := time.Now().UTC().Add(c.idempotencyTTL())
+		if err := c.store.Update(ctx, msg.IdempotencyKey, qidempotency.Update{
+			Status:    &status,
+			Payload:   &emptyPayload,
+			ExpiresAt: &expiresAt,
+		}); err != nil {
+			return dedupProceed, nil, err
+		}
+		return dedupProceed, nil, nil
+	default:
+		return dedupProceed, nil, nil
+	}
+}
+
+func (c *TaskCommander) dedupAfterExecute(ctx context.Context, msg *ExecutionMessage, execErr *error) {
+	if c == nil || c.store == nil {
+		dedupAfterExecute(c.tracker, msg, execErr)
+		return
+	}
+	if msg == nil || msg.IdempotencyKey == "" || msg.DedupPolicy == "" || msg.DedupPolicy == DedupPolicyIgnore {
+		return
+	}
+
+	status := qidempotency.StatusCompleted
+	payload := []byte(nil)
+	if execErr != nil && *execErr != nil {
+		status = qidempotency.StatusFailed
+		payload = []byte((*execErr).Error())
+	}
+	expiresAt := time.Now().UTC().Add(c.idempotencyTTL())
+	_ = c.store.Update(ctx, msg.IdempotencyKey, qidempotency.Update{
+		Status:    &status,
+		Payload:   &payload,
+		ExpiresAt: &expiresAt,
+	})
+}
+
+func (c *TaskCommander) idempotencyTTL() time.Duration {
+	if c == nil || c.storeTTL <= 0 {
+		return 24 * time.Hour
+	}
+	return c.storeTTL
 }
 
 func (c *TaskCommander) acquireConcurrency(msg *ExecutionMessage) (func(), error) {
