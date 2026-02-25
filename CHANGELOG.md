@@ -1,5 +1,27 @@
 # Changelog
 
+# [0.15.0](https://github.com/goliatone/go-job/compare/v0.14.0...v0.15.0) - (2026-02-25)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.15.0 ([fec28aa](https://github.com/goliatone/go-job/commit/fec28aaccabce9588df12d439b9913972171286b))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Aling task commander for idenpotency and state management ([908022c](https://github.com/goliatone/go-job/commit/908022ca6a31ff7ee634d4f65607ba94f0fae4d4))  - (goliatone)
+- Terminal error ([8d6c27d](https://github.com/goliatone/go-job/commit/8d6c27d007ecfd6677d87075e6fc5f1e2f1b8454))  - (goliatone)
+- Queue persistence, storage, commands, adapters, and worker ([5b0670c](https://github.com/goliatone/go-job/commit/5b0670cd2dfdeec27a4417ac0dc452b902075a6e))  - (goliatone)
+- Implement enqueue tx semantics ([89a0a3e](https://github.com/goliatone/go-job/commit/89a0a3e4bc675b8b6daa7d30f1f44672471f8085))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.14.0 ([bc40d9a](https://github.com/goliatone/go-job/commit/bc40d9ae0ed99c2a9786e9a96e55ec889d901308))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update readme ([7b0d01a](https://github.com/goliatone/go-job/commit/7b0d01a3793ad18436877e3e49bf92a4e585785a))  - (goliatone)
+- Update test ([40b3a1f](https://github.com/goliatone/go-job/commit/40b3a1f92d2ca3f968f81d0a501ee685d6398d1e))  - (goliatone)
+
 # [0.14.0](https://github.com/goliatone/go-job/compare/v0.13.0...v0.14.0) - (2026-01-05)
 
 ## <!-- 1 -->🐛 Bug Fixes
