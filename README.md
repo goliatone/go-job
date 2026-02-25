@@ -200,6 +200,7 @@ Under the hood, `TaskCommander` wraps a `job.Task`, validates incoming `Executio
 **ExecutionMessage validation & defaults**
 - Required: `job_id` and `script_path`. TaskCommander/CompleteExecutionMessage will fill these from the task metadata, but if they remain empty the command fails fast with a validation error (text code `JOB_EXEC_MSG_INVALID`).
 - Defaults: `parameters` is normalized to an empty map, and `dedup_policy` defaults to `ignore` when unspecified so idempotency checks remain safe.
+- FSM correlation fields are additive and preserved by queue codecs/envelopes: `machine_id`, `entity_id`, `execution_id`, `expected_state`, `expected_version`, `resume_event`.
 
 ### Queue Execution (Adapters + Worker)
 
@@ -207,8 +208,9 @@ Under the hood, `TaskCommander` wraps a `job.Task`, validates incoming `Executio
 
 - `queue` interfaces and storage contract (`queue.Storage`).
 - `queue/adapters/redis` and `queue/adapters/postgres` implementations.
-- `queue/worker` runtime with ack/nack, retries, DLQ, and cancellation hooks.
+- `queue/worker` runtime with ack/nack, retries, DLQ, cancellation hooks, lease heartbeat extension, and lifecycle hook metadata.
 - `queue/idempotency` shared idempotency stores for Redis/Postgres.
+- `queue.StorageOutboxAdapter` for orchestrator-style outbox dispatch loops (`ClaimPending`, `MarkCompleted`, `MarkFailed`).
 
 Configuration sketch:
 
@@ -237,7 +239,33 @@ _ = worker.RegisterAll(tasks)
 _ = worker.Start(ctx)
 
 _ = adapter.Enqueue(ctx, msg)
+_ = adapter.EnqueueAfter(ctx, msg, 30*time.Second)
 ```
+
+Outbox compatibility wiring:
+
+```go
+outbox := queue.NewStorageOutboxAdapter(storage)
+entries, _ := outbox.ClaimPending(ctx, "dispatcher-1", 100, 30*time.Second)
+for _, entry := range entries {
+	// dispatch entry.Message to your scheduler/executor
+	_ = outbox.MarkCompleted(ctx, entry.ID, entry.LeaseToken)
+}
+```
+
+Worker control/status surface:
+
+```go
+_ = worker.Pause()
+status := worker.Status() // status.Status == "paused"
+_ = worker.Resume()
+_ = worker.Stop(ctx)
+```
+
+Status values align with orchestrated execution expectations:
+- `running`: actively consuming queue deliveries.
+- `paused`: workers are alive but dequeue/dispatch is suspended.
+- `stopped`: worker has been stopped (or never started).
 
 ### Basic Example (Manual Execution)
 
