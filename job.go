@@ -31,7 +31,14 @@ type ExecutionMessage struct {
 	JobID string `json:"job_id" yaml:"job_id"`
 	// ScriptPath is the filesystem path to the script. Filled from Task.GetPath() when using TaskCommander/CompleteExecutionMessage.
 	ScriptPath string `json:"script_path" yaml:"script_path"`
-	Config     Config `json:"config" yaml:"config"`
+	// Canonical FSM correlation fields used by durable orchestrator execution.
+	MachineID       string `json:"machine_id,omitempty" yaml:"machine_id,omitempty"`
+	EntityID        string `json:"entity_id,omitempty" yaml:"entity_id,omitempty"`
+	ExecutionID     string `json:"execution_id,omitempty" yaml:"execution_id,omitempty"`
+	ExpectedState   string `json:"expected_state,omitempty" yaml:"expected_state,omitempty"`
+	ExpectedVersion int64  `json:"expected_version,omitempty" yaml:"expected_version,omitempty"`
+	ResumeEvent     string `json:"resume_event,omitempty" yaml:"resume_event,omitempty"`
+	Config          Config `json:"config" yaml:"config"`
 	// Parameters carries runtime inputs. Defaults to an empty map to avoid nil dereferences when normalized.
 	Parameters     map[string]any `json:"parameters" yaml:"parameters"`
 	IdempotencyKey string         `json:"idempotency_key" yaml:"idempotency_key"`
