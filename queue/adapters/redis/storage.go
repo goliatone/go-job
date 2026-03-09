@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	job "github.com/goliatone/go-job"
@@ -24,6 +25,7 @@ const (
 	fieldCreatedAt = "created_at"
 	fieldUpdatedAt = "updated_at"
 	fieldLastError = "last_error"
+	fieldDeadAt    = "dead_lettered_at"
 )
 
 // Option configures the redis storage adapter.
@@ -121,21 +123,33 @@ func NewStorage(client Client, opts ...Option) *Storage {
 
 // Enqueue stores a message and enqueues it for delivery.
 func (s *Storage) Enqueue(ctx context.Context, msg *job.ExecutionMessage) error {
-	return s.EnqueueAt(ctx, msg, s.now())
+	_, err := s.EnqueueWithReceipt(ctx, msg)
+	return err
+}
+
+// EnqueueWithReceipt stores a message and returns dispatch metadata.
+func (s *Storage) EnqueueWithReceipt(ctx context.Context, msg *job.ExecutionMessage) (queue.EnqueueReceipt, error) {
+	return s.EnqueueAtWithReceipt(ctx, msg, s.now())
 }
 
 // EnqueueAt stores a message and schedules it for delivery at the provided time.
 func (s *Storage) EnqueueAt(ctx context.Context, msg *job.ExecutionMessage, at time.Time) error {
+	_, err := s.EnqueueAtWithReceipt(ctx, msg, at)
+	return err
+}
+
+// EnqueueAtWithReceipt stores a message and schedules it for delivery at the provided time.
+func (s *Storage) EnqueueAtWithReceipt(ctx context.Context, msg *job.ExecutionMessage, at time.Time) (queue.EnqueueReceipt, error) {
 	if s == nil || s.client == nil {
-		return fmt.Errorf("redis storage not configured")
+		return queue.EnqueueReceipt{}, fmt.Errorf("redis storage not configured")
 	}
 	if err := queue.ValidateRequiredMessage(msg); err != nil {
-		return err
+		return queue.EnqueueReceipt{}, err
 	}
 
 	payload, err := queue.EncodeExecutionMessage(msg)
 	if err != nil {
-		return err
+		return queue.EnqueueReceipt{}, err
 	}
 
 	id := s.idFunc()
@@ -149,22 +163,38 @@ func (s *Storage) EnqueueAt(ctx context.Context, msg *job.ExecutionMessage, at t
 		fieldCreatedAt: strconv.FormatInt(now, 10),
 		fieldUpdatedAt: strconv.FormatInt(now, 10),
 	}); err != nil {
-		return err
+		return queue.EnqueueReceipt{}, err
 	}
 
 	if at.After(s.now()) {
-		return s.client.ZAdd(ctx, s.keys.delayed(), float64(at.UnixNano()), id)
+		if err := s.client.ZAdd(ctx, s.keys.delayed(), float64(at.UnixNano()), id); err != nil {
+			return queue.EnqueueReceipt{}, err
+		}
+	} else {
+		if err := s.client.LPush(ctx, s.keys.ready(), id); err != nil {
+			return queue.EnqueueReceipt{}, err
+		}
 	}
-	return s.client.LPush(ctx, s.keys.ready(), id)
+
+	return queue.EnqueueReceipt{
+		DispatchID: id,
+		EnqueuedAt: time.Unix(0, now).UTC(),
+	}, nil
 }
 
 // EnqueueAfter stores a message and schedules it after the provided delay.
 func (s *Storage) EnqueueAfter(ctx context.Context, msg *job.ExecutionMessage, delay time.Duration) error {
+	_, err := s.EnqueueAfterWithReceipt(ctx, msg, delay)
+	return err
+}
+
+// EnqueueAfterWithReceipt stores a message and schedules it after the provided delay.
+func (s *Storage) EnqueueAfterWithReceipt(ctx context.Context, msg *job.ExecutionMessage, delay time.Duration) (queue.EnqueueReceipt, error) {
 	at := s.now()
 	if delay > 0 {
 		at = at.Add(delay)
 	}
-	return s.EnqueueAt(ctx, msg, at)
+	return s.EnqueueAtWithReceipt(ctx, msg, at)
 }
 
 // Dequeue leases the next available message.
@@ -290,6 +320,13 @@ func (s *Storage) Nack(ctx context.Context, receipt queue.Receipt, opts queue.Na
 	}
 
 	if opts.DeadLetter {
+		nowUnix := now.UnixNano()
+		if err := s.client.HSet(ctx, s.keys.message(receipt.ID), map[string]string{
+			fieldDeadAt:    strconv.FormatInt(nowUnix, 10),
+			fieldUpdatedAt: strconv.FormatInt(nowUnix, 10),
+		}); err != nil {
+			return err
+		}
 		return s.client.LPush(ctx, s.keys.dlq(), receipt.ID)
 	}
 
@@ -312,6 +349,61 @@ func (s *Storage) Nack(ctx context.Context, receipt queue.Receipt, opts queue.Na
 	}
 
 	return s.client.Del(ctx, s.keys.message(receipt.ID))
+}
+
+// GetDispatchStatus probes queue hash fields to infer dispatch status.
+func (s *Storage) GetDispatchStatus(ctx context.Context, dispatchID string) (queue.DispatchStatus, error) {
+	status := queue.DispatchStatus{
+		DispatchID: strings.TrimSpace(dispatchID),
+		State:      queue.DispatchStateUnknown,
+	}
+	if s == nil || s.client == nil {
+		return status, fmt.Errorf("redis storage not configured")
+	}
+	if status.DispatchID == "" {
+		return status, nil
+	}
+
+	fields, err := s.client.HGetAll(ctx, s.keys.message(status.DispatchID))
+	if err != nil {
+		return status, err
+	}
+	if len(fields) == 0 {
+		status.State = queue.DispatchStateSucceeded
+		status.Inferred = true
+		return status, nil
+	}
+
+	now := s.now().UnixNano()
+	attempts := parseInt(fields[fieldAttempts])
+	availableAt := parseInt64(fields[fieldAvailable])
+	createdAt := parseInt64(fields[fieldCreatedAt])
+	updatedAt := parseInt64(fields[fieldUpdatedAt])
+	token := fields[fieldToken]
+	deadAt := parseInt64(fields[fieldDeadAt])
+	lastError := fields[fieldLastError]
+
+	status.Attempt = attempts
+	status.EnqueuedAt = ptrTime(unixNanoTime(createdAt))
+	status.UpdatedAt = ptrTime(unixNanoTime(updatedAt))
+	status.TerminalReason = lastError
+
+	switch {
+	case deadAt > 0:
+		status.State = queue.DispatchStateDeadLetter
+	case token != "":
+		status.State = queue.DispatchStateRunning
+	case attempts > 0 && availableAt > now:
+		status.State = queue.DispatchStateRetrying
+		status.NextRunAt = ptrTime(unixNanoTime(availableAt))
+	default:
+		status.State = queue.DispatchStateAccepted
+		if availableAt > now {
+			status.NextRunAt = ptrTime(unixNanoTime(availableAt))
+		}
+	}
+
+	return status, nil
 }
 
 // ExtendLease extends the in-flight lease for a delivery receipt.
@@ -419,4 +511,19 @@ func randomHex(size int) string {
 		return strconv.FormatInt(time.Now().UnixNano(), 10)
 	}
 	return hex.EncodeToString(buf)
+}
+
+func unixNanoTime(ts int64) time.Time {
+	if ts <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, ts).UTC()
+}
+
+func ptrTime(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	v := value.UTC()
+	return &v
 }
