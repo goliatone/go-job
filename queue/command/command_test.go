@@ -178,3 +178,40 @@ func TestRegisterCommandByTypeDuplicateNoOp(t *testing.T) {
 		t.Fatalf("expected 1 command, got %d", len(reg.List()))
 	}
 }
+
+func TestRegisterCommandByTypeDuplicateStrictConflict(t *testing.T) {
+	reg := NewRegistry()
+	cmd := &testCommand{}
+	meta := command.CommandMeta{
+		MessageType:      command.GetMessageType(testMessage{}),
+		MessageTypeValue: reflect.TypeOf(testMessage{}),
+		MessageValue:     testMessage{},
+	}
+
+	if err := RegisterCommandByTypeWithOptions(reg, cmd, meta, WithStrictDuplicateRegistration(true)); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	err := RegisterCommandByTypeWithOptions(reg, cmd, meta, WithStrictDuplicateRegistration(true))
+	if err == nil {
+		t.Fatal("expected duplicate registration conflict")
+	}
+}
+
+func TestQueueResolverWithOptionsDuplicateStrictConflict(t *testing.T) {
+	reg := NewRegistry()
+	cmd := &testCommand{}
+	meta := command.CommandMeta{
+		MessageType:      command.GetMessageType(testMessage{}),
+		MessageTypeValue: reflect.TypeOf(testMessage{}),
+		MessageValue:     testMessage{},
+	}
+
+	resolver := QueueResolverWithOptions(reg, WithStrictDuplicateRegistration(true))
+	if err := resolver(cmd, meta, nil); err != nil {
+		t.Fatalf("resolver register: %v", err)
+	}
+	err := resolver(cmd, meta, nil)
+	if err == nil {
+		t.Fatal("expected duplicate registration conflict")
+	}
+}

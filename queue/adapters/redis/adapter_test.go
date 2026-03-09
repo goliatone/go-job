@@ -36,6 +36,94 @@ func TestStorageEnqueueDequeueAck(t *testing.T) {
 	assert.False(t, client.HasKey(storage.keys.message(receipt.ID)))
 }
 
+func TestAdapterEnqueueReceiptsAndDispatchStatusLifecycle(t *testing.T) {
+	client := newFakeClient()
+	clock := newManualClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	storage := NewStorage(client,
+		WithClock(clock.Now),
+		WithVisibilityTimeout(10*time.Second),
+		WithIDFunc(sequence("msg-1", "msg-2", "msg-3")),
+		WithTokenFunc(sequence("token-1", "token-2", "token-3")),
+	)
+	adapter := NewAdapter(storage)
+	ctx := context.Background()
+
+	msg := &job.ExecutionMessage{JobID: "export", ScriptPath: "/tmp/export"}
+	receipt, err := adapter.EnqueueWithReceipt(ctx, msg)
+	require.NoError(t, err)
+	require.NotEmpty(t, receipt.DispatchID)
+	require.False(t, receipt.EnqueuedAt.IsZero())
+
+	status, err := adapter.GetDispatchStatus(ctx, receipt.DispatchID)
+	require.NoError(t, err)
+	assert.Equal(t, queue.DispatchStateAccepted, status.State)
+
+	delivery, err := adapter.Dequeue(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, delivery)
+
+	status, err = adapter.GetDispatchStatus(ctx, receipt.DispatchID)
+	require.NoError(t, err)
+	assert.Equal(t, queue.DispatchStateRunning, status.State)
+
+	require.NoError(t, delivery.Nack(ctx, queue.NackOptions{
+		Delay:   5 * time.Second,
+		Requeue: true,
+		Reason:  "retry",
+	}))
+	status, err = adapter.GetDispatchStatus(ctx, receipt.DispatchID)
+	require.NoError(t, err)
+	assert.Equal(t, queue.DispatchStateRetrying, status.State)
+	assert.Equal(t, "retry", status.TerminalReason)
+
+	clock.Advance(5 * time.Second)
+	delivery, err = adapter.Dequeue(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, delivery)
+	require.NoError(t, delivery.Nack(ctx, queue.NackOptions{
+		DeadLetter: true,
+		Reason:     "fatal",
+	}))
+
+	status, err = adapter.GetDispatchStatus(ctx, receipt.DispatchID)
+	require.NoError(t, err)
+	assert.Equal(t, queue.DispatchStateDeadLetter, status.State)
+	assert.Equal(t, "fatal", status.TerminalReason)
+
+	receipt2, err := adapter.EnqueueWithReceipt(ctx, msg)
+	require.NoError(t, err)
+	delivery2, err := adapter.Dequeue(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, delivery2)
+	require.NoError(t, delivery2.Ack(ctx))
+
+	status2, err := adapter.GetDispatchStatus(ctx, receipt2.DispatchID)
+	require.NoError(t, err)
+	assert.Equal(t, queue.DispatchStateSucceeded, status2.State)
+	assert.True(t, status2.Inferred)
+}
+
+func TestAdapterScheduledReceiptVariants(t *testing.T) {
+	client := newFakeClient()
+	clock := newManualClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	storage := NewStorage(client,
+		WithClock(clock.Now),
+		WithVisibilityTimeout(10*time.Second),
+		WithIDFunc(sequence("msg-1", "msg-2")),
+		WithTokenFunc(sequence("token-1", "token-2")),
+	)
+	adapter := NewAdapter(storage)
+	msg := &job.ExecutionMessage{JobID: "export", ScriptPath: "/tmp/export"}
+
+	r1, err := adapter.EnqueueAtWithReceipt(context.Background(), msg, clock.Now().Add(1*time.Minute))
+	require.NoError(t, err)
+	require.NotEmpty(t, r1.DispatchID)
+
+	r2, err := adapter.EnqueueAfterWithReceipt(context.Background(), msg, 5*time.Second)
+	require.NoError(t, err)
+	require.NotEmpty(t, r2.DispatchID)
+}
+
 func TestStorageNackDelayedRetry(t *testing.T) {
 	client := newFakeClient()
 	clock := newManualClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
