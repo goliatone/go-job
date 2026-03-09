@@ -45,12 +45,29 @@ _ = commandregistry.Start(ctx)
 
 ## Running Commands in the Worker
 
-The worker registers tasks derived from the command registry. When `ids` is `nil` or empty, all registered commands are added.
+The worker registers tasks derived from the command registry.
+
+- When `ids` is `nil` or empty, all registered commands are added.
+- When `ids` is explicit, each id must be non-empty and pre-registered.
+- Duplicate ids in explicit lists are de-duplicated before registration.
 
 ```go
 w := worker.NewWorker(dequeuer)
 _ = queuecmd.RegisterAll(w, cmdReg, nil)
 _ = w.Start(ctx)
+```
+
+For same-machine topology bootstrap:
+
+```go
+w, _ := queuecmd.StartLocalWorker(ctx, dequeuer, cmdReg, queuecmd.LocalWorkerConfig{
+	IDs: nil, // register all commands
+	WorkerOptions: []worker.Option{
+		worker.WithConcurrency(4),
+		worker.WithIdleDelay(100 * time.Millisecond),
+	},
+})
+defer w.Stop(context.Background())
 ```
 
 ## Enqueueing a Command
@@ -165,6 +182,9 @@ When present, the config is attached to the task and used by the worker.
 - `RegisterCommandWithRegistry[T any](reg *Registry, cmd command.Commander[T], runnerOpts ...runner.Option) (dispatcher.Subscription, error)`
 - `QueueResolver(reg *Registry) command.Resolver`
 - `RegisterAll(w *worker.Worker, reg *Registry, ids []string) error`
+- `LocalWorkerConfig`
+- `NewLocalWorker(dequeuer queue.Dequeuer, reg *Registry, cfg LocalWorkerConfig) (*worker.Worker, error)`
+- `StartLocalWorker(ctx context.Context, dequeuer queue.Dequeuer, reg *Registry, cfg LocalWorkerConfig) (*worker.Worker, error)`
 - `Enqueue(ctx context.Context, enq queue.Enqueuer, reg *Registry, id string, params map[string]any) error`
 - `EnqueueAt(ctx context.Context, enq queue.ScheduledEnqueuer, reg *Registry, id string, params map[string]any, at time.Time) error`
 - `EnqueueAfter(ctx context.Context, enq queue.ScheduledEnqueuer, reg *Registry, id string, params map[string]any, delay time.Duration) error`
