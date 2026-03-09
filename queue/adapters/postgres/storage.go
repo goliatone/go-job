@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	job "github.com/goliatone/go-job"
@@ -161,21 +162,33 @@ func (s *Storage) Cleanup(ctx context.Context) error {
 
 // Enqueue stores the message for delivery.
 func (s *Storage) Enqueue(ctx context.Context, msg *job.ExecutionMessage) error {
-	return s.EnqueueAt(ctx, msg, s.now())
+	_, err := s.EnqueueWithReceipt(ctx, msg)
+	return err
+}
+
+// EnqueueWithReceipt stores the message for delivery and returns dispatch metadata.
+func (s *Storage) EnqueueWithReceipt(ctx context.Context, msg *job.ExecutionMessage) (queue.EnqueueReceipt, error) {
+	return s.EnqueueAtWithReceipt(ctx, msg, s.now())
 }
 
 // EnqueueAt stores a message for delivery at the given time.
 func (s *Storage) EnqueueAt(ctx context.Context, msg *job.ExecutionMessage, at time.Time) error {
+	_, err := s.EnqueueAtWithReceipt(ctx, msg, at)
+	return err
+}
+
+// EnqueueAtWithReceipt stores a message for delivery at the given time and returns dispatch metadata.
+func (s *Storage) EnqueueAtWithReceipt(ctx context.Context, msg *job.ExecutionMessage, at time.Time) (queue.EnqueueReceipt, error) {
 	if s == nil || s.db == nil {
-		return fmt.Errorf("postgres storage not configured")
+		return queue.EnqueueReceipt{}, fmt.Errorf("postgres storage not configured")
 	}
 	if err := queue.ValidateRequiredMessage(msg); err != nil {
-		return err
+		return queue.EnqueueReceipt{}, err
 	}
 
 	payload, err := queue.EncodeExecutionMessage(msg)
 	if err != nil {
-		return err
+		return queue.EnqueueReceipt{}, err
 	}
 
 	now := s.now().UnixNano()
@@ -186,16 +199,30 @@ func (s *Storage) EnqueueAt(ctx context.Context, msg *job.ExecutionMessage, at t
 (id, payload, attempts, available_at, leased_until, token, created_at, updated_at)
 VALUES (%s, %s, 0, %s, 0, '', %s, %s)`, s.table, p(1), p(2), p(3), p(4), p(5))
 	_, err = s.db.ExecContext(ctx, query, id, string(payload), availableAt, now, now)
-	return err
+	if err != nil {
+		return queue.EnqueueReceipt{}, err
+	}
+
+	enqueuedAt := unixNanoTime(now)
+	return queue.EnqueueReceipt{
+		DispatchID: id,
+		EnqueuedAt: enqueuedAt,
+	}, nil
 }
 
 // EnqueueAfter stores a message for delivery after the provided delay.
 func (s *Storage) EnqueueAfter(ctx context.Context, msg *job.ExecutionMessage, delay time.Duration) error {
+	_, err := s.EnqueueAfterWithReceipt(ctx, msg, delay)
+	return err
+}
+
+// EnqueueAfterWithReceipt stores a message for delivery after the provided delay and returns dispatch metadata.
+func (s *Storage) EnqueueAfterWithReceipt(ctx context.Context, msg *job.ExecutionMessage, delay time.Duration) (queue.EnqueueReceipt, error) {
 	at := s.now()
 	if delay > 0 {
 		at = at.Add(delay)
 	}
-	return s.EnqueueAt(ctx, msg, at)
+	return s.EnqueueAtWithReceipt(ctx, msg, at)
 }
 
 // Dequeue leases the next available message.
@@ -303,6 +330,80 @@ func (s *Storage) ExtendLease(ctx context.Context, receipt queue.Receipt, ttl ti
 		return fmt.Errorf("receipt token mismatch for %q", receipt.ID)
 	}
 	return nil
+}
+
+// GetDispatchStatus probes queue + DLQ state to infer lifecycle status for a dispatch id.
+func (s *Storage) GetDispatchStatus(ctx context.Context, dispatchID string) (queue.DispatchStatus, error) {
+	status := queue.DispatchStatus{
+		DispatchID: strings.TrimSpace(dispatchID),
+		State:      queue.DispatchStateUnknown,
+	}
+	if s == nil || s.db == nil {
+		return status, fmt.Errorf("postgres storage not configured")
+	}
+	if status.DispatchID == "" {
+		return status, nil
+	}
+
+	now := s.now().UnixNano()
+	p := s.placeholder
+
+	primaryQuery := fmt.Sprintf(`SELECT attempts, available_at, leased_until, created_at, updated_at, last_error
+FROM %s WHERE id = %s`, s.table, p(1))
+	row := s.db.QueryRowContext(ctx, primaryQuery, status.DispatchID)
+	var attempts int
+	var availableAt int64
+	var leasedUntil int64
+	var createdAt int64
+	var updatedAt int64
+	var lastError sql.NullString
+	if err := row.Scan(&attempts, &availableAt, &leasedUntil, &createdAt, &updatedAt, &lastError); err == nil {
+		status.Attempt = attempts
+		status.EnqueuedAt = ptrTime(unixNanoTime(createdAt))
+		status.UpdatedAt = ptrTime(unixNanoTime(updatedAt))
+		if leasedUntil > now {
+			status.State = queue.DispatchStateRunning
+			return status, nil
+		}
+		if attempts > 0 && availableAt > now {
+			status.State = queue.DispatchStateRetrying
+			status.NextRunAt = ptrTime(unixNanoTime(availableAt))
+			if lastError.Valid {
+				status.TerminalReason = lastError.String
+			}
+			return status, nil
+		}
+		status.State = queue.DispatchStateAccepted
+		if availableAt > now {
+			status.NextRunAt = ptrTime(unixNanoTime(availableAt))
+		}
+		return status, nil
+	} else if err != sql.ErrNoRows {
+		return status, err
+	}
+
+	dlqQuery := fmt.Sprintf(`SELECT attempts, last_error, created_at, updated_at FROM %s WHERE id = %s`, s.dlqTable, p(1))
+	dlqRow := s.db.QueryRowContext(ctx, dlqQuery, status.DispatchID)
+	var dlqAttempts int
+	var dlqReason sql.NullString
+	var dlqCreatedAt int64
+	var dlqUpdatedAt int64
+	if err := dlqRow.Scan(&dlqAttempts, &dlqReason, &dlqCreatedAt, &dlqUpdatedAt); err == nil {
+		status.State = queue.DispatchStateDeadLetter
+		status.Attempt = dlqAttempts
+		status.EnqueuedAt = ptrTime(unixNanoTime(dlqCreatedAt))
+		status.UpdatedAt = ptrTime(unixNanoTime(dlqUpdatedAt))
+		if dlqReason.Valid {
+			status.TerminalReason = dlqReason.String
+		}
+		return status, nil
+	} else if err != sql.ErrNoRows {
+		return status, err
+	}
+
+	status.State = queue.DispatchStateSucceeded
+	status.Inferred = true
+	return status, nil
 }
 
 func (s *Storage) dequeueSkipLocked(ctx context.Context) (*job.ExecutionMessage, queue.Receipt, error) {
@@ -515,4 +616,12 @@ func randomHex(size int) string {
 		return strconv.FormatInt(time.Now().UnixNano(), 10)
 	}
 	return hex.EncodeToString(buf)
+}
+
+func ptrTime(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	v := value.UTC()
+	return &v
 }
