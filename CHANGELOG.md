@@ -1,5 +1,30 @@
 # Changelog
 
+# [0.16.0](https://github.com/goliatone/go-job/compare/v0.15.0...v0.16.0) - (2026-03-09)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.16.0 ([3ee25e3](https://github.com/goliatone/go-job/commit/3ee25e3cb25ef6947572456d36f492ae76608399))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Queue interfaces to handle receipts, registration and metadata ([56e3da8](https://github.com/goliatone/go-job/commit/56e3da858082e2f4bdf4aeb87c72950cba90304c))  - (goliatone)
+- Local worker def ([fc8a7f6](https://github.com/goliatone/go-job/commit/fc8a7f6477ae0095f8c87980d9cff8cc02837bd7))  - (goliatone)
+- Queue resolver support options ([a8d639a](https://github.com/goliatone/go-job/commit/a8d639a2840f8dc383c3ba80164be5b4c2b08afb))  - (goliatone)
+- Define EnqueueWithReceipt and delayed enqueue semanics ([16dbcc1](https://github.com/goliatone/go-job/commit/16dbcc187ad2fc69689c0a4a62d5adaac36d5b86))  - (goliatone)
+- Queue command support for return meta and worker registration ([ce13c9f](https://github.com/goliatone/go-job/commit/ce13c9fb9f172bbbf35e2e3e2c7a585e435ba77f))  - (goliatone)
+- Implement enqueue with receipt and queue status query ([f85569c](https://github.com/goliatone/go-job/commit/f85569c4743ddc688971c6e3ac962cdc1d28efc3))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.15.0 ([3dffc5e](https://github.com/goliatone/go-job/commit/3dffc5e71f4b0158867eb37c4329bb0151442fe5))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update tasks and deps ([f4d91b8](https://github.com/goliatone/go-job/commit/f4d91b8b6ef4c7db97690748b8979eceb6361d51))  - (goliatone)
+- Update deps ([249d87f](https://github.com/goliatone/go-job/commit/249d87f765b1e4107e6d87eb5522feff780b40dc))  - (goliatone)
+- Update tests ([65c3269](https://github.com/goliatone/go-job/commit/65c3269557db63eac7a5228cc011fd7d2eab2515))  - (goliatone)
+
 # [0.15.0](https://github.com/goliatone/go-job/compare/v0.14.0...v0.15.0) - (2026-02-25)
 
 ## <!-- 13 -->📦 Bumps
