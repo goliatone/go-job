@@ -24,31 +24,70 @@ func (a *Adapter) Enqueue(ctx context.Context, msg *job.ExecutionMessage) error 
 	if a == nil || a.storage == nil {
 		return fmt.Errorf("queue adapter not configured")
 	}
-	return a.storage.Enqueue(ctx, msg)
+	_, err := a.EnqueueWithReceipt(ctx, msg)
+	return err
+}
+
+// EnqueueWithReceipt forwards to the underlying storage and returns enqueue metadata.
+func (a *Adapter) EnqueueWithReceipt(ctx context.Context, msg *job.ExecutionMessage) (queue.EnqueueReceipt, error) {
+	if a == nil || a.storage == nil {
+		return queue.EnqueueReceipt{}, fmt.Errorf("queue adapter not configured")
+	}
+	if receiver, ok := a.storage.(queue.ReceiptStorage); ok {
+		return receiver.EnqueueWithReceipt(ctx, msg)
+	}
+	if err := a.storage.Enqueue(ctx, msg); err != nil {
+		return queue.EnqueueReceipt{}, err
+	}
+	return queue.EnqueueReceipt{}, nil
 }
 
 // EnqueueAt forwards scheduled enqueue requests to storage when supported.
 func (a *Adapter) EnqueueAt(ctx context.Context, msg *job.ExecutionMessage, at time.Time) error {
+	_, err := a.EnqueueAtWithReceipt(ctx, msg, at)
+	return err
+}
+
+// EnqueueAtWithReceipt forwards scheduled enqueue requests to storage when supported.
+func (a *Adapter) EnqueueAtWithReceipt(ctx context.Context, msg *job.ExecutionMessage, at time.Time) (queue.EnqueueReceipt, error) {
 	if a == nil || a.storage == nil {
-		return fmt.Errorf("queue adapter not configured")
+		return queue.EnqueueReceipt{}, fmt.Errorf("queue adapter not configured")
+	}
+	if scheduler, ok := a.storage.(queue.ReceiptScheduledStorage); ok {
+		return scheduler.EnqueueAtWithReceipt(ctx, msg, at)
 	}
 	scheduler, ok := a.storage.(queue.ScheduledStorage)
 	if !ok {
-		return queue.ErrScheduledEnqueueUnsupported
+		return queue.EnqueueReceipt{}, queue.ErrScheduledEnqueueUnsupported
 	}
-	return scheduler.EnqueueAt(ctx, msg, at)
+	if err := scheduler.EnqueueAt(ctx, msg, at); err != nil {
+		return queue.EnqueueReceipt{}, err
+	}
+	return queue.EnqueueReceipt{}, nil
 }
 
 // EnqueueAfter forwards delayed enqueue requests to storage when supported.
 func (a *Adapter) EnqueueAfter(ctx context.Context, msg *job.ExecutionMessage, delay time.Duration) error {
+	_, err := a.EnqueueAfterWithReceipt(ctx, msg, delay)
+	return err
+}
+
+// EnqueueAfterWithReceipt forwards delayed enqueue requests to storage when supported.
+func (a *Adapter) EnqueueAfterWithReceipt(ctx context.Context, msg *job.ExecutionMessage, delay time.Duration) (queue.EnqueueReceipt, error) {
 	if a == nil || a.storage == nil {
-		return fmt.Errorf("queue adapter not configured")
+		return queue.EnqueueReceipt{}, fmt.Errorf("queue adapter not configured")
+	}
+	if scheduler, ok := a.storage.(queue.ReceiptScheduledStorage); ok {
+		return scheduler.EnqueueAfterWithReceipt(ctx, msg, delay)
 	}
 	scheduler, ok := a.storage.(queue.ScheduledStorage)
 	if !ok {
-		return queue.ErrScheduledEnqueueUnsupported
+		return queue.EnqueueReceipt{}, queue.ErrScheduledEnqueueUnsupported
 	}
-	return scheduler.EnqueueAfter(ctx, msg, delay)
+	if err := scheduler.EnqueueAfter(ctx, msg, delay); err != nil {
+		return queue.EnqueueReceipt{}, err
+	}
+	return queue.EnqueueReceipt{}, nil
 }
 
 // Dequeue returns a delivery wrapper when available.
@@ -106,4 +145,19 @@ func (d *delivery) Attempts() int {
 		return 0
 	}
 	return d.receipt.Attempts
+}
+
+// GetDispatchStatus probes the underlying storage for dispatch lifecycle state.
+func (a *Adapter) GetDispatchStatus(ctx context.Context, dispatchID string) (queue.DispatchStatus, error) {
+	if a == nil || a.storage == nil {
+		return queue.DispatchStatus{}, fmt.Errorf("queue adapter not configured")
+	}
+	reader, ok := a.storage.(queue.DispatchStatusReader)
+	if !ok {
+		return queue.DispatchStatus{
+			DispatchID: dispatchID,
+			State:      queue.DispatchStateUnknown,
+		}, nil
+	}
+	return reader.GetDispatchStatus(ctx, dispatchID)
 }
