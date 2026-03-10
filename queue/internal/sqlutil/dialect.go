@@ -1,0 +1,36 @@
+package sqlutil
+
+// Dialect controls SQL placeholder formatting.
+type Dialect string
+
+const (
+	DialectPostgres Dialect = "postgres"
+	DialectSQLite   Dialect = "sqlite"
+)
+
+// PlaceholderFunc formats a placeholder for a 1-based parameter index.
+type PlaceholderFunc func(int) string
+
+// PlaceholderFor returns a dialect-aware placeholder formatter.
+func PlaceholderFor(dialect Dialect) PlaceholderFunc {
+	switch dialect {
+	case DialectSQLite:
+		return func(_ int) string { return "?" }
+	default:
+		return func(i int) string { return "$" + itoa(i) }
+	}
+}
+
+func itoa(value int) string {
+	if value == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	for value > 0 {
+		i--
+		buf[i] = byte('0' + value%10)
+		value /= 10
+	}
+	return string(buf[i:])
+}
