@@ -1,6 +1,8 @@
 package queue
 
 import (
+	"fmt"
+
 	"github.com/goliatone/go-errors"
 	job "github.com/goliatone/go-job"
 )
@@ -30,4 +32,19 @@ func ValidateRequiredMessage(msg *job.ExecutionMessage) error {
 	}
 
 	return nil
+}
+
+// ValidateNackOptions enforces explicit nack disposition semantics.
+func ValidateNackOptions(opts NackOptions) error {
+	switch opts.Disposition {
+	case NackDispositionRetry:
+		if opts.Delay < 0 {
+			return fmt.Errorf("retry delay must be >= 0")
+		}
+		return nil
+	case NackDispositionDeadLetter, NackDispositionFailed, NackDispositionCanceled:
+		return nil
+	default:
+		return fmt.Errorf("nack disposition required")
+	}
 }
