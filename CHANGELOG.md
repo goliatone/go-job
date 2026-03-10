@@ -1,5 +1,65 @@
 # Changelog
 
+# [0.17.0](https://github.com/goliatone/go-job/compare/v0.16.0...v0.17.0) - (2026-03-10)
+
+## ⚠️ Breaking
+
+- Queue enqueue contracts are now receipt-first:
+  - `queue.Enqueuer.Enqueue(ctx, msg)` now returns `(queue.EnqueueReceipt, error)`.
+  - `queue.ScheduledEnqueuer.EnqueueAt/EnqueueAfter` now return `(queue.EnqueueReceipt, error)`.
+- Removed compatibility bridge interfaces:
+  - `queue.ReceiptEnqueuer`
+  - `queue.ReceiptScheduledEnqueuer`
+  - `queue.ReceiptStorage`
+  - `queue.ReceiptScheduledStorage`
+- `queue/command.Enqueue`, `EnqueueAt`, and `EnqueueAfter` now return `(queue.EnqueueReceipt, error)`.
+- Queue command registration is strict by default: duplicate `command_id` registration now returns an explicit conflict error.
+
+## ➕ Add
+
+- Added cross-repo compatibility task `dev:test:cross` to validate `go-job` + local `go-command` workspace contracts.
+
+## 🔁 Status Contract
+
+- `Adapter.GetDispatchStatus` now returns `queue.ErrDispatchStatusUnsupported` when the backing storage does not implement `queue.DispatchStatusReader`.
+- Added status constants for lifecycle parity surfaces:
+  - `queue.DispatchStateCanceled`
+  - `queue.DispatchStateFailed`
+
+## 📚 Migration
+
+Before:
+
+```go
+_ = adapter.Enqueue(ctx, msg)
+_ = adapter.EnqueueAfter(ctx, msg, 30*time.Second)
+_ = queuecmd.Enqueue(ctx, adapter, reg, id, params)
+```
+
+After:
+
+```go
+receipt, err := adapter.Enqueue(ctx, msg)
+if err != nil { return err }
+
+scheduled, err := adapter.EnqueueAfter(ctx, msg, 30*time.Second)
+if err != nil { return err }
+
+cmdReceipt, err := queuecmd.Enqueue(ctx, adapter, reg, id, params)
+if err != nil { return err }
+_ = receipt.DispatchID
+_ = scheduled.DispatchID
+_ = cmdReceipt.DispatchID
+```
+
+Resolver registration guidance (single-path wiring):
+
+```go
+// Use resolver-driven queue registration OR direct queue registration, not both.
+_ = cmdRegistry.AddResolver("queue", queuecmd.QueueResolver(queueRegistry))
+_, _ = queuecmd.RegisterCommandWithRegistry(queueRegistry, myCommand)
+```
+
 # [0.16.0](https://github.com/goliatone/go-job/compare/v0.15.0...v0.16.0) - (2026-03-09)
 
 ## <!-- 13 -->📦 Bumps
