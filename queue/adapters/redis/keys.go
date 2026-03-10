@@ -29,10 +29,18 @@ func (k keySet) message(id string) string {
 	return fmt.Sprintf("%s:msg:%s", k.prefix, id)
 }
 
+func (k keySet) messagePrefix() string {
+	return fmt.Sprintf("%s:msg:", k.prefix)
+}
+
 func (k keySet) status(id string) string {
 	return fmt.Sprintf("%s:status:%s", k.prefix, id)
 }
 
 func (k keySet) dlq() string {
 	return fmt.Sprintf("%s:dlq", k.prefix)
+}
+
+func (k keySet) leaseSeq() string {
+	return fmt.Sprintf("%s:lease_seq", k.prefix)
 }
