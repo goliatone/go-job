@@ -16,6 +16,7 @@ import (
 const (
 	defaultVisibilityTimeout = 60 * time.Second
 	defaultReleaseBatchSize  = 100
+	defaultStatusTTL         = 7 * 24 * time.Hour
 
 	fieldPayload   = "payload"
 	fieldAttempts  = "attempts"
@@ -26,6 +27,13 @@ const (
 	fieldUpdatedAt = "updated_at"
 	fieldLastError = "last_error"
 	fieldDeadAt    = "dead_lettered_at"
+
+	statusFieldState     = "state"
+	statusFieldAttempt   = "attempt"
+	statusFieldEnqueued  = "enqueued_at"
+	statusFieldUpdated   = "updated_at"
+	statusFieldNextRunAt = "next_run_at"
+	statusFieldReason    = "terminal_reason"
 )
 
 // Option configures the redis storage adapter.
@@ -85,12 +93,22 @@ func WithReleaseBatchSize(size int64) Option {
 	}
 }
 
+// WithStatusTTL sets dispatch status retention TTL.
+func WithStatusTTL(ttl time.Duration) Option {
+	return func(s *Storage) {
+		if ttl > 0 {
+			s.statusTTL = ttl
+		}
+	}
+}
+
 // Storage implements queue.Storage backed by Redis primitives.
 type Storage struct {
 	client            Client
 	keys              keySet
 	visibilityTimeout time.Duration
 	releaseBatchSize  int64
+	statusTTL         time.Duration
 	now               func() time.Time
 	idFunc            func() string
 	tokenFunc         func() string
@@ -103,6 +121,7 @@ func NewStorage(client Client, opts ...Option) *Storage {
 		keys:              newKeySet("queue"),
 		visibilityTimeout: defaultVisibilityTimeout,
 		releaseBatchSize:  defaultReleaseBatchSize,
+		statusTTL:         defaultStatusTTL,
 		now:               time.Now,
 		idFunc:            func() string { return randomHex(16) },
 		tokenFunc:         func() string { return randomHex(16) },
@@ -117,6 +136,9 @@ func NewStorage(client Client, opts ...Option) *Storage {
 	}
 	if s.releaseBatchSize <= 0 {
 		s.releaseBatchSize = defaultReleaseBatchSize
+	}
+	if s.statusTTL <= 0 {
+		s.statusTTL = defaultStatusTTL
 	}
 	return s
 }
@@ -141,20 +163,21 @@ func (s *Storage) EnqueueAt(ctx context.Context, msg *job.ExecutionMessage, at t
 	}
 
 	id := s.idFunc()
-	now := s.now().UnixNano()
+	now := s.now().UTC()
+	nowUnix := now.UnixNano()
 
 	if err := s.client.HSet(ctx, s.keys.message(id), map[string]string{
 		fieldPayload:   string(payload),
 		fieldAttempts:  "0",
 		fieldToken:     "",
 		fieldAvailable: strconv.FormatInt(at.UnixNano(), 10),
-		fieldCreatedAt: strconv.FormatInt(now, 10),
-		fieldUpdatedAt: strconv.FormatInt(now, 10),
+		fieldCreatedAt: strconv.FormatInt(nowUnix, 10),
+		fieldUpdatedAt: strconv.FormatInt(nowUnix, 10),
 	}); err != nil {
 		return queue.EnqueueReceipt{}, err
 	}
 
-	if at.After(s.now()) {
+	if at.After(now) {
 		if err := s.client.ZAdd(ctx, s.keys.delayed(), float64(at.UnixNano()), id); err != nil {
 			return queue.EnqueueReceipt{}, err
 		}
@@ -164,9 +187,25 @@ func (s *Storage) EnqueueAt(ctx context.Context, msg *job.ExecutionMessage, at t
 		}
 	}
 
+	nextRunAt := at.UTC()
+	if !nextRunAt.After(now) {
+		nextRunAt = time.Time{}
+	}
+	if err := s.writeStatus(ctx, statusRecord{
+		DispatchID:     id,
+		State:          queue.DispatchStateAccepted,
+		Attempt:        0,
+		EnqueuedAt:     now,
+		UpdatedAt:      now,
+		NextRunAt:      nextRunAt,
+		TerminalReason: "",
+	}); err != nil {
+		return queue.EnqueueReceipt{}, err
+	}
+
 	return queue.EnqueueReceipt{
 		DispatchID: id,
-		EnqueuedAt: time.Unix(0, now).UTC(),
+		EnqueuedAt: time.Unix(0, nowUnix).UTC(),
 	}, nil
 }
 
@@ -239,6 +278,17 @@ func (s *Storage) Dequeue(ctx context.Context) (*job.ExecutionMessage, queue.Rec
 	if err := s.client.ZAdd(ctx, s.keys.inflight(), float64(leaseUntil), id); err != nil {
 		return nil, queue.Receipt{}, err
 	}
+	if err := s.writeStatus(ctx, statusRecord{
+		DispatchID:     id,
+		State:          queue.DispatchStateRunning,
+		Attempt:        attempts,
+		EnqueuedAt:     createdAtTime,
+		UpdatedAt:      now,
+		NextRunAt:      time.Time{},
+		TerminalReason: "",
+	}); err != nil {
+		return nil, queue.Receipt{}, err
+	}
 
 	return msg, queue.Receipt{
 		ID:          id,
@@ -262,6 +312,19 @@ func (s *Storage) Ack(ctx context.Context, receipt queue.Receipt) error {
 	if err := s.ensureToken(ctx, receipt); err != nil {
 		return err
 	}
+	fields, err := s.client.HGetAll(ctx, s.keys.message(receipt.ID))
+	if err != nil {
+		return err
+	}
+	now := s.now().UTC()
+	attempts := parseInt(fields[fieldAttempts])
+	enqueuedAt := unixNanoTime(parseInt64(fields[fieldCreatedAt]))
+	if enqueuedAt.IsZero() {
+		enqueuedAt = receipt.CreatedAt.UTC()
+	}
+	if enqueuedAt.IsZero() {
+		enqueuedAt = now
+	}
 
 	if err := s.client.ZRem(ctx, s.keys.inflight(), receipt.ID); err != nil {
 		return err
@@ -269,7 +332,18 @@ func (s *Storage) Ack(ctx context.Context, receipt queue.Receipt) error {
 	if err := s.client.ZRem(ctx, s.keys.delayed(), receipt.ID); err != nil {
 		return err
 	}
-	return s.client.Del(ctx, s.keys.message(receipt.ID))
+	if err := s.client.Del(ctx, s.keys.message(receipt.ID)); err != nil {
+		return err
+	}
+	return s.writeStatus(ctx, statusRecord{
+		DispatchID:     receipt.ID,
+		State:          queue.DispatchStateSucceeded,
+		Attempt:        attempts,
+		EnqueuedAt:     enqueuedAt,
+		UpdatedAt:      now,
+		NextRunAt:      time.Time{},
+		TerminalReason: "",
+	})
 }
 
 // Nack releases the message according to the provided options.
@@ -280,11 +354,20 @@ func (s *Storage) Nack(ctx context.Context, receipt queue.Receipt, opts queue.Na
 	if receipt.ID == "" {
 		return fmt.Errorf("receipt id required")
 	}
+	if err := queue.ValidateNackOptions(opts); err != nil {
+		return err
+	}
 	if err := s.ensureToken(ctx, receipt); err != nil {
 		return err
 	}
+	fields, err := s.client.HGetAll(ctx, s.keys.message(receipt.ID))
+	if err != nil {
+		return err
+	}
+	attempts := parseInt(fields[fieldAttempts])
+	enqueuedAt := unixNanoTime(parseInt64(fields[fieldCreatedAt]))
 
-	now := s.now()
+	now := s.now().UTC()
 	if err := s.client.ZRem(ctx, s.keys.inflight(), receipt.ID); err != nil {
 		return err
 	}
@@ -301,7 +384,7 @@ func (s *Storage) Nack(ctx context.Context, receipt queue.Receipt, opts queue.Na
 		return err
 	}
 
-	if opts.DeadLetter {
+	if opts.Disposition == queue.NackDispositionDeadLetter {
 		nowUnix := now.UnixNano()
 		if err := s.client.HSet(ctx, s.keys.message(receipt.ID), map[string]string{
 			fieldDeadAt:    strconv.FormatInt(nowUnix, 10),
@@ -309,10 +392,21 @@ func (s *Storage) Nack(ctx context.Context, receipt queue.Receipt, opts queue.Na
 		}); err != nil {
 			return err
 		}
-		return s.client.LPush(ctx, s.keys.dlq(), receipt.ID)
+		if err := s.client.LPush(ctx, s.keys.dlq(), receipt.ID); err != nil {
+			return err
+		}
+		return s.writeStatus(ctx, statusRecord{
+			DispatchID:     receipt.ID,
+			State:          queue.DispatchStateDeadLetter,
+			Attempt:        attempts,
+			EnqueuedAt:     enqueuedAt,
+			UpdatedAt:      now,
+			NextRunAt:      time.Time{},
+			TerminalReason: strings.TrimSpace(opts.Reason),
+		})
 	}
 
-	if opts.Requeue {
+	if opts.Disposition == queue.NackDispositionRetry {
 		availableAt := now
 		if opts.Delay > 0 {
 			availableAt = now.Add(opts.Delay)
@@ -321,19 +415,56 @@ func (s *Storage) Nack(ctx context.Context, receipt queue.Receipt, opts queue.Na
 			if err := s.client.HSet(ctx, s.keys.message(receipt.ID), update); err != nil {
 				return err
 			}
-			return s.client.ZAdd(ctx, s.keys.delayed(), score, receipt.ID)
+			if err := s.client.ZAdd(ctx, s.keys.delayed(), score, receipt.ID); err != nil {
+				return err
+			}
+			return s.writeStatus(ctx, statusRecord{
+				DispatchID:     receipt.ID,
+				State:          queue.DispatchStateRetrying,
+				Attempt:        attempts,
+				EnqueuedAt:     enqueuedAt,
+				UpdatedAt:      now,
+				NextRunAt:      availableAt,
+				TerminalReason: strings.TrimSpace(opts.Reason),
+			})
 		}
 		update[fieldAvailable] = strconv.FormatInt(availableAt.UnixNano(), 10)
 		if err := s.client.HSet(ctx, s.keys.message(receipt.ID), update); err != nil {
 			return err
 		}
-		return s.client.LPush(ctx, s.keys.ready(), receipt.ID)
+		if err := s.client.LPush(ctx, s.keys.ready(), receipt.ID); err != nil {
+			return err
+		}
+		return s.writeStatus(ctx, statusRecord{
+			DispatchID:     receipt.ID,
+			State:          queue.DispatchStateAccepted,
+			Attempt:        attempts,
+			EnqueuedAt:     enqueuedAt,
+			UpdatedAt:      now,
+			NextRunAt:      time.Time{},
+			TerminalReason: strings.TrimSpace(opts.Reason),
+		})
 	}
 
-	return s.client.Del(ctx, s.keys.message(receipt.ID))
+	if err := s.client.Del(ctx, s.keys.message(receipt.ID)); err != nil {
+		return err
+	}
+	state := queue.DispatchStateFailed
+	if opts.Disposition == queue.NackDispositionCanceled {
+		state = queue.DispatchStateCanceled
+	}
+	return s.writeStatus(ctx, statusRecord{
+		DispatchID:     receipt.ID,
+		State:          state,
+		Attempt:        attempts,
+		EnqueuedAt:     enqueuedAt,
+		UpdatedAt:      now,
+		NextRunAt:      time.Time{},
+		TerminalReason: strings.TrimSpace(opts.Reason),
+	})
 }
 
-// GetDispatchStatus probes queue hash fields to infer dispatch status.
+// GetDispatchStatus reads durable status records for a dispatch id.
 func (s *Storage) GetDispatchStatus(ctx context.Context, dispatchID string) (queue.DispatchStatus, error) {
 	status := queue.DispatchStatus{
 		DispatchID: strings.TrimSpace(dispatchID),
@@ -342,48 +473,22 @@ func (s *Storage) GetDispatchStatus(ctx context.Context, dispatchID string) (que
 		return status, fmt.Errorf("redis storage not configured")
 	}
 	if status.DispatchID == "" {
-		return status, nil
+		return status, queue.ErrDispatchNotFound
 	}
 
-	fields, err := s.client.HGetAll(ctx, s.keys.message(status.DispatchID))
+	fields, err := s.client.HGetAll(ctx, s.keys.status(status.DispatchID))
 	if err != nil {
 		return status, err
 	}
 	if len(fields) == 0 {
-		status.State = queue.DispatchStateSucceeded
-		status.Inferred = true
-		return status, nil
+		return status, queue.ErrDispatchNotFound
 	}
-
-	now := s.now().UnixNano()
-	attempts := parseInt(fields[fieldAttempts])
-	availableAt := parseInt64(fields[fieldAvailable])
-	createdAt := parseInt64(fields[fieldCreatedAt])
-	updatedAt := parseInt64(fields[fieldUpdatedAt])
-	token := fields[fieldToken]
-	deadAt := parseInt64(fields[fieldDeadAt])
-	lastError := fields[fieldLastError]
-
-	status.Attempt = attempts
-	status.EnqueuedAt = ptrTime(unixNanoTime(createdAt))
-	status.UpdatedAt = ptrTime(unixNanoTime(updatedAt))
-	status.TerminalReason = lastError
-
-	switch {
-	case deadAt > 0:
-		status.State = queue.DispatchStateDeadLetter
-	case token != "":
-		status.State = queue.DispatchStateRunning
-	case attempts > 0 && availableAt > now:
-		status.State = queue.DispatchStateRetrying
-		status.NextRunAt = ptrTime(unixNanoTime(availableAt))
-	default:
-		status.State = queue.DispatchStateAccepted
-		if availableAt > now {
-			status.NextRunAt = ptrTime(unixNanoTime(availableAt))
-		}
-	}
-
+	status.State = queue.DispatchState(fields[statusFieldState])
+	status.Attempt = parseInt(fields[statusFieldAttempt])
+	status.EnqueuedAt = ptrTime(unixNanoTime(parseInt64(fields[statusFieldEnqueued])))
+	status.UpdatedAt = ptrTime(unixNanoTime(parseInt64(fields[statusFieldUpdated])))
+	status.NextRunAt = ptrTime(unixNanoTime(parseInt64(fields[statusFieldNextRunAt])))
+	status.TerminalReason = strings.TrimSpace(fields[statusFieldReason])
 	return status, nil
 }
 
@@ -398,17 +503,40 @@ func (s *Storage) ExtendLease(ctx context.Context, receipt queue.Receipt, ttl ti
 	if err := s.ensureToken(ctx, receipt); err != nil {
 		return err
 	}
+	fields, err := s.client.HGetAll(ctx, s.keys.message(receipt.ID))
+	if err != nil {
+		return err
+	}
 	if ttl <= 0 {
 		ttl = s.visibilityTimeout
 	}
-	now := s.now()
+	now := s.now().UTC()
 	until := now.Add(ttl).UnixNano()
 	if err := s.client.ZAdd(ctx, s.keys.inflight(), float64(until), receipt.ID); err != nil {
 		return err
 	}
-	return s.client.HSet(ctx, s.keys.message(receipt.ID), map[string]string{
+	if err := s.client.HSet(ctx, s.keys.message(receipt.ID), map[string]string{
 		fieldLeasedAt:  strconv.FormatInt(now.UnixNano(), 10),
 		fieldUpdatedAt: strconv.FormatInt(now.UnixNano(), 10),
+	}); err != nil {
+		return err
+	}
+
+	enqueuedAt := unixNanoTime(parseInt64(fields[fieldCreatedAt]))
+	if enqueuedAt.IsZero() {
+		enqueuedAt = receipt.CreatedAt.UTC()
+	}
+	if enqueuedAt.IsZero() {
+		enqueuedAt = now
+	}
+	return s.writeStatus(ctx, statusRecord{
+		DispatchID:     receipt.ID,
+		State:          queue.DispatchStateRunning,
+		Attempt:        parseInt(fields[fieldAttempts]),
+		EnqueuedAt:     enqueuedAt,
+		UpdatedAt:      now,
+		NextRunAt:      time.Time{},
+		TerminalReason: "",
 	})
 }
 
@@ -427,6 +555,10 @@ func (s *Storage) releaseSet(ctx context.Context, key string, max float64, clear
 	}
 
 	for _, item := range items {
+		fields, err := s.client.HGetAll(ctx, s.keys.message(item.Member))
+		if err != nil {
+			return err
+		}
 		if err := s.client.ZRem(ctx, key, item.Member); err != nil {
 			return err
 		}
@@ -443,6 +575,22 @@ func (s *Storage) releaseSet(ctx context.Context, key string, max float64, clear
 		if err := s.client.LPush(ctx, s.keys.ready(), item.Member); err != nil {
 			return err
 		}
+		now := s.now().UTC()
+		enqueuedAt := unixNanoTime(parseInt64(fields[fieldCreatedAt]))
+		if enqueuedAt.IsZero() {
+			enqueuedAt = now
+		}
+		if err := s.writeStatus(ctx, statusRecord{
+			DispatchID:     item.Member,
+			State:          queue.DispatchStateAccepted,
+			Attempt:        parseInt(fields[fieldAttempts]),
+			EnqueuedAt:     enqueuedAt,
+			UpdatedAt:      now,
+			NextRunAt:      time.Time{},
+			TerminalReason: strings.TrimSpace(fields[fieldLastError]),
+		}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -457,6 +605,53 @@ func (s *Storage) ensureToken(ctx context.Context, receipt queue.Receipt) error 
 	}
 	if receipt.Token != token {
 		return fmt.Errorf("receipt token mismatch for %q", receipt.ID)
+	}
+	return nil
+}
+
+type statusRecord struct {
+	DispatchID     string
+	State          queue.DispatchState
+	Attempt        int
+	EnqueuedAt     time.Time
+	UpdatedAt      time.Time
+	NextRunAt      time.Time
+	TerminalReason string
+}
+
+func (s *Storage) writeStatus(ctx context.Context, record statusRecord) error {
+	dispatchID := strings.TrimSpace(record.DispatchID)
+	if dispatchID == "" {
+		return fmt.Errorf("dispatch id required")
+	}
+	if record.State == "" {
+		return fmt.Errorf("dispatch state required")
+	}
+	enqueuedAt := record.EnqueuedAt.UTC()
+	if enqueuedAt.IsZero() {
+		enqueuedAt = s.now().UTC()
+	}
+	updatedAt := record.UpdatedAt.UTC()
+	if updatedAt.IsZero() {
+		updatedAt = s.now().UTC()
+	}
+	nextRunAt := int64(0)
+	if !record.NextRunAt.IsZero() {
+		nextRunAt = record.NextRunAt.UTC().UnixNano()
+	}
+
+	if err := s.client.HSet(ctx, s.keys.status(dispatchID), map[string]string{
+		statusFieldState:     string(record.State),
+		statusFieldAttempt:   strconv.Itoa(record.Attempt),
+		statusFieldEnqueued:  strconv.FormatInt(enqueuedAt.UnixNano(), 10),
+		statusFieldUpdated:   strconv.FormatInt(updatedAt.UnixNano(), 10),
+		statusFieldNextRunAt: strconv.FormatInt(nextRunAt, 10),
+		statusFieldReason:    strings.TrimSpace(record.TerminalReason),
+	}); err != nil {
+		return err
+	}
+	if s.statusTTL > 0 {
+		return s.client.Expire(ctx, s.keys.status(dispatchID), s.statusTTL)
 	}
 	return nil
 }
