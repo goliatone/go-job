@@ -18,6 +18,8 @@ const (
 	defaultVisibilityTimeout = 60 * time.Second
 	defaultTableName         = "queue_messages"
 	defaultDLQTableName      = "queue_dlq"
+	defaultStatusTableName   = "queue_dispatch_status"
+	defaultStatusTTL         = 7 * 24 * time.Hour
 )
 
 // Option configures the postgres storage adapter.
@@ -37,6 +39,15 @@ func WithDLQTableName(name string) Option {
 	return func(s *Storage) {
 		if name != "" {
 			s.dlqTable = name
+		}
+	}
+}
+
+// WithStatusTableName sets the dispatch status table name.
+func WithStatusTableName(name string) Option {
+	return func(s *Storage) {
+		if name != "" {
+			s.statusTable = name
 		}
 	}
 }
@@ -94,12 +105,23 @@ func WithUseSkipLocked(enabled bool) Option {
 	}
 }
 
+// WithStatusTTL sets dispatch status retention TTL.
+func WithStatusTTL(ttl time.Duration) Option {
+	return func(s *Storage) {
+		if ttl > 0 {
+			s.statusTTL = ttl
+		}
+	}
+}
+
 // Storage implements queue.Storage backed by a SQL database.
 type Storage struct {
 	db                *sql.DB
 	table             string
 	dlqTable          string
+	statusTable       string
 	visibilityTimeout time.Duration
+	statusTTL         time.Duration
 	now               func() time.Time
 	idFunc            func() string
 	tokenFunc         func() string
@@ -113,7 +135,9 @@ func NewStorage(db *sql.DB, opts ...Option) *Storage {
 		db:                db,
 		table:             defaultTableName,
 		dlqTable:          defaultDLQTableName,
+		statusTable:       defaultStatusTableName,
 		visibilityTimeout: defaultVisibilityTimeout,
+		statusTTL:         defaultStatusTTL,
 		now:               time.Now,
 		idFunc:            func() string { return randomHex(16) },
 		tokenFunc:         func() string { return randomHex(16) },
@@ -128,6 +152,9 @@ func NewStorage(db *sql.DB, opts ...Option) *Storage {
 	if s.visibilityTimeout <= 0 {
 		s.visibilityTimeout = defaultVisibilityTimeout
 	}
+	if s.statusTTL <= 0 {
+		s.statusTTL = defaultStatusTTL
+	}
 	if s.placeholder == nil {
 		s.placeholder = placeholderFor(DialectPostgres)
 	}
@@ -139,7 +166,7 @@ func (s *Storage) Migrate(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("postgres storage not configured")
 	}
-	for _, stmt := range schemaStatements(s.table, s.dlqTable) {
+	for _, stmt := range schemaStatements(s.table, s.dlqTable, s.statusTable) {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return err
 		}
@@ -152,7 +179,7 @@ func (s *Storage) Cleanup(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("postgres storage not configured")
 	}
-	for _, stmt := range dropStatements(s.table, s.dlqTable) {
+	for _, stmt := range dropStatements(s.table, s.dlqTable, s.statusTable) {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return err
 		}
@@ -179,19 +206,37 @@ func (s *Storage) EnqueueAt(ctx context.Context, msg *job.ExecutionMessage, at t
 		return queue.EnqueueReceipt{}, err
 	}
 
-	now := s.now().UnixNano()
+	now := s.now().UTC()
+	nowUnix := now.UnixNano()
 	availableAt := at.UnixNano()
 	id := s.idFunc()
 	p := s.placeholder
 	query := fmt.Sprintf(`INSERT INTO %s
 (id, payload, attempts, available_at, leased_until, token, created_at, updated_at)
 VALUES (%s, %s, 0, %s, 0, '', %s, %s)`, s.table, p(1), p(2), p(3), p(4), p(5))
-	_, err = s.db.ExecContext(ctx, query, id, string(payload), availableAt, now, now)
+	_, err = s.db.ExecContext(ctx, query, id, string(payload), availableAt, nowUnix, nowUnix)
 	if err != nil {
 		return queue.EnqueueReceipt{}, err
 	}
 
-	enqueuedAt := unixNanoTime(now)
+	enqueuedAt := unixNanoTime(nowUnix)
+	state := queue.DispatchStateAccepted
+	nextRunAt := unixNanoTime(availableAt)
+	if !nextRunAt.After(now) {
+		nextRunAt = time.Time{}
+	}
+	if err := s.upsertStatus(ctx, s.db, statusRecord{
+		DispatchID:     id,
+		State:          state,
+		Attempt:        0,
+		EnqueuedAt:     enqueuedAt,
+		UpdatedAt:      now,
+		NextRunAt:      nextRunAt,
+		TerminalReason: "",
+	}); err != nil {
+		return queue.EnqueueReceipt{}, err
+	}
+
 	return queue.EnqueueReceipt{
 		DispatchID: id,
 		EnqueuedAt: enqueuedAt,
@@ -227,17 +272,42 @@ func (s *Storage) Ack(ctx context.Context, receipt queue.Receipt) error {
 	if receipt.ID == "" || receipt.Token == "" {
 		return fmt.Errorf("receipt id and token required")
 	}
-	p := s.placeholder
-	query := fmt.Sprintf(`DELETE FROM %s WHERE id = %s AND token = %s`, s.table, p(1), p(2))
-	res, err := s.db.ExecContext(ctx, query, receipt.ID, receipt.Token)
+
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	affected, _ := res.RowsAffected()
-	if affected == 0 {
-		return fmt.Errorf("receipt token mismatch for %q", receipt.ID)
+	defer rollback(tx)
+
+	_, attempts, createdAt, err := s.loadForReceipt(ctx, tx, receipt)
+	if err != nil {
+		return err
 	}
-	return nil
+	if err := s.deleteMessage(ctx, tx, receipt); err != nil {
+		return err
+	}
+
+	now := s.now().UTC()
+	enqueuedAt := unixNanoTime(createdAt)
+	if enqueuedAt.IsZero() {
+		enqueuedAt = receipt.CreatedAt.UTC()
+	}
+	if enqueuedAt.IsZero() {
+		enqueuedAt = now
+	}
+	if err := s.upsertStatus(ctx, tx, statusRecord{
+		DispatchID:     receipt.ID,
+		State:          queue.DispatchStateSucceeded,
+		Attempt:        attempts,
+		EnqueuedAt:     enqueuedAt,
+		UpdatedAt:      now,
+		NextRunAt:      time.Time{},
+		TerminalReason: "",
+	}); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 // Nack requeues, delays, or dead-letters a message.
@@ -247,6 +317,9 @@ func (s *Storage) Nack(ctx context.Context, receipt queue.Receipt, opts queue.Na
 	}
 	if receipt.ID == "" || receipt.Token == "" {
 		return fmt.Errorf("receipt id and token required")
+	}
+	if err := queue.ValidateNackOptions(opts); err != nil {
+		return err
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -260,18 +333,37 @@ func (s *Storage) Nack(ctx context.Context, receipt queue.Receipt, opts queue.Na
 		return err
 	}
 
-	now := s.now()
-	if opts.DeadLetter {
+	now := s.now().UTC()
+	enqueuedAt := unixNanoTime(createdAt)
+	if enqueuedAt.IsZero() {
+		enqueuedAt = receipt.CreatedAt.UTC()
+	}
+	if enqueuedAt.IsZero() {
+		enqueuedAt = now
+	}
+
+	if opts.Disposition == queue.NackDispositionDeadLetter {
 		if err := s.insertDLQ(ctx, tx, receipt.ID, payload, attempts, createdAt, opts.Reason, now); err != nil {
 			return err
 		}
 		if err := s.deleteMessage(ctx, tx, receipt); err != nil {
 			return err
 		}
+		if err := s.upsertStatus(ctx, tx, statusRecord{
+			DispatchID:     receipt.ID,
+			State:          queue.DispatchStateDeadLetter,
+			Attempt:        attempts,
+			EnqueuedAt:     enqueuedAt,
+			UpdatedAt:      now,
+			NextRunAt:      time.Time{},
+			TerminalReason: strings.TrimSpace(opts.Reason),
+		}); err != nil {
+			return err
+		}
 		return tx.Commit()
 	}
 
-	if opts.Requeue {
+	if opts.Disposition == queue.NackDispositionRetry {
 		availableAt := now
 		if opts.Delay > 0 {
 			availableAt = now.Add(opts.Delay)
@@ -279,10 +371,36 @@ func (s *Storage) Nack(ctx context.Context, receipt queue.Receipt, opts queue.Na
 		if err := s.updateForRetry(ctx, tx, receipt, availableAt, opts.Reason, now); err != nil {
 			return err
 		}
+		if err := s.upsertStatus(ctx, tx, statusRecord{
+			DispatchID:     receipt.ID,
+			State:          queue.DispatchStateRetrying,
+			Attempt:        attempts,
+			EnqueuedAt:     enqueuedAt,
+			UpdatedAt:      now,
+			NextRunAt:      availableAt,
+			TerminalReason: strings.TrimSpace(opts.Reason),
+		}); err != nil {
+			return err
+		}
 		return tx.Commit()
 	}
 
 	if err := s.deleteMessage(ctx, tx, receipt); err != nil {
+		return err
+	}
+	state := queue.DispatchStateFailed
+	if opts.Disposition == queue.NackDispositionCanceled {
+		state = queue.DispatchStateCanceled
+	}
+	if err := s.upsertStatus(ctx, tx, statusRecord{
+		DispatchID:     receipt.ID,
+		State:          state,
+		Attempt:        attempts,
+		EnqueuedAt:     enqueuedAt,
+		UpdatedAt:      now,
+		NextRunAt:      time.Time{},
+		TerminalReason: strings.TrimSpace(opts.Reason),
+	}); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -311,10 +429,25 @@ func (s *Storage) ExtendLease(ctx context.Context, receipt queue.Receipt, ttl ti
 	if affected == 0 {
 		return fmt.Errorf("receipt token mismatch for %q", receipt.ID)
 	}
+	enqueuedAt := receipt.CreatedAt.UTC()
+	if enqueuedAt.IsZero() {
+		enqueuedAt = now
+	}
+	if err := s.upsertStatus(ctx, s.db, statusRecord{
+		DispatchID:     receipt.ID,
+		State:          queue.DispatchStateRunning,
+		Attempt:        receipt.Attempts,
+		EnqueuedAt:     enqueuedAt,
+		UpdatedAt:      now,
+		NextRunAt:      time.Time{},
+		TerminalReason: "",
+	}); err != nil {
+		return err
+	}
 	return nil
 }
 
-// GetDispatchStatus probes queue + DLQ state to infer lifecycle status for a dispatch id.
+// GetDispatchStatus reads durable dispatch status records for a dispatch id.
 func (s *Storage) GetDispatchStatus(ctx context.Context, dispatchID string) (queue.DispatchStatus, error) {
 	status := queue.DispatchStatus{
 		DispatchID: strings.TrimSpace(dispatchID),
@@ -323,67 +456,37 @@ func (s *Storage) GetDispatchStatus(ctx context.Context, dispatchID string) (que
 		return status, fmt.Errorf("postgres storage not configured")
 	}
 	if status.DispatchID == "" {
-		return status, nil
+		return status, queue.ErrDispatchNotFound
 	}
 
-	now := s.now().UnixNano()
+	nowUnix := s.now().UTC().UnixNano()
 	p := s.placeholder
+	query := fmt.Sprintf(`SELECT state, attempt, enqueued_at, updated_at, next_run_at, terminal_reason
+FROM %s
+WHERE dispatch_id = %s AND expires_at > %s`, s.statusTable, p(1), p(2))
+	row := s.db.QueryRowContext(ctx, query, status.DispatchID, nowUnix)
 
-	primaryQuery := fmt.Sprintf(`SELECT attempts, available_at, leased_until, created_at, updated_at, last_error
-FROM %s WHERE id = %s`, s.table, p(1))
-	row := s.db.QueryRowContext(ctx, primaryQuery, status.DispatchID)
-	var attempts int
-	var availableAt int64
-	var leasedUntil int64
-	var createdAt int64
+	var state string
+	var attempt int
+	var enqueuedAt int64
 	var updatedAt int64
-	var lastError sql.NullString
-	if err := row.Scan(&attempts, &availableAt, &leasedUntil, &createdAt, &updatedAt, &lastError); err == nil {
-		status.Attempt = attempts
-		status.EnqueuedAt = ptrTime(unixNanoTime(createdAt))
-		status.UpdatedAt = ptrTime(unixNanoTime(updatedAt))
-		if leasedUntil > now {
-			status.State = queue.DispatchStateRunning
-			return status, nil
+	var nextRunAt int64
+	var terminalReason sql.NullString
+	if err := row.Scan(&state, &attempt, &enqueuedAt, &updatedAt, &nextRunAt, &terminalReason); err != nil {
+		if err == sql.ErrNoRows {
+			return status, queue.ErrDispatchNotFound
 		}
-		if attempts > 0 && availableAt > now {
-			status.State = queue.DispatchStateRetrying
-			status.NextRunAt = ptrTime(unixNanoTime(availableAt))
-			if lastError.Valid {
-				status.TerminalReason = lastError.String
-			}
-			return status, nil
-		}
-		status.State = queue.DispatchStateAccepted
-		if availableAt > now {
-			status.NextRunAt = ptrTime(unixNanoTime(availableAt))
-		}
-		return status, nil
-	} else if err != sql.ErrNoRows {
 		return status, err
 	}
 
-	dlqQuery := fmt.Sprintf(`SELECT attempts, last_error, created_at, updated_at FROM %s WHERE id = %s`, s.dlqTable, p(1))
-	dlqRow := s.db.QueryRowContext(ctx, dlqQuery, status.DispatchID)
-	var dlqAttempts int
-	var dlqReason sql.NullString
-	var dlqCreatedAt int64
-	var dlqUpdatedAt int64
-	if err := dlqRow.Scan(&dlqAttempts, &dlqReason, &dlqCreatedAt, &dlqUpdatedAt); err == nil {
-		status.State = queue.DispatchStateDeadLetter
-		status.Attempt = dlqAttempts
-		status.EnqueuedAt = ptrTime(unixNanoTime(dlqCreatedAt))
-		status.UpdatedAt = ptrTime(unixNanoTime(dlqUpdatedAt))
-		if dlqReason.Valid {
-			status.TerminalReason = dlqReason.String
-		}
-		return status, nil
-	} else if err != sql.ErrNoRows {
-		return status, err
+	status.State = queue.DispatchState(state)
+	status.Attempt = attempt
+	status.EnqueuedAt = ptrTime(unixNanoTime(enqueuedAt))
+	status.UpdatedAt = ptrTime(unixNanoTime(updatedAt))
+	status.NextRunAt = ptrTime(unixNanoTime(nextRunAt))
+	if terminalReason.Valid {
+		status.TerminalReason = terminalReason.String
 	}
-
-	status.State = queue.DispatchStateSucceeded
-	status.Inferred = true
 	return status, nil
 }
 
@@ -429,6 +532,17 @@ LIMIT 1`, s.table, p(1), p(2))
 
 	updateQuery := fmt.Sprintf(`UPDATE %s SET attempts = %s, token = %s, leased_until = %s, updated_at = %s WHERE id = %s`, s.table, p(1), p(2), p(3), p(4), p(5))
 	if _, err := tx.ExecContext(ctx, updateQuery, attempts, token, leaseUntil, nowUnix, id); err != nil {
+		return nil, queue.Receipt{}, err
+	}
+	if err := s.upsertStatus(ctx, tx, statusRecord{
+		DispatchID:     id,
+		State:          queue.DispatchStateRunning,
+		Attempt:        attempts,
+		EnqueuedAt:     unixNanoTime(createdAt),
+		UpdatedAt:      now,
+		NextRunAt:      time.Time{},
+		TerminalReason: "",
+	}); err != nil {
 		return nil, queue.Receipt{}, err
 	}
 
@@ -495,6 +609,17 @@ WHERE id = %s AND (leased_until = 0 OR leased_until <= %s)`, s.table, p(1), p(2)
 	affected, _ := res.RowsAffected()
 	if affected == 0 {
 		return nil, queue.Receipt{}, tx.Commit()
+	}
+	if err := s.upsertStatus(ctx, tx, statusRecord{
+		DispatchID:     id,
+		State:          queue.DispatchStateRunning,
+		Attempt:        attempts,
+		EnqueuedAt:     unixNanoTime(createdAt),
+		UpdatedAt:      now,
+		NextRunAt:      time.Time{},
+		TerminalReason: "",
+	}); err != nil {
+		return nil, queue.Receipt{}, err
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -568,6 +693,72 @@ func (s *Storage) deleteMessage(ctx context.Context, tx *sql.Tx, receipt queue.R
 		return fmt.Errorf("receipt token mismatch for %q", receipt.ID)
 	}
 	return nil
+}
+
+type statusRecord struct {
+	DispatchID     string
+	State          queue.DispatchState
+	Attempt        int
+	EnqueuedAt     time.Time
+	UpdatedAt      time.Time
+	NextRunAt      time.Time
+	TerminalReason string
+}
+
+type sqlExecutor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func (s *Storage) upsertStatus(ctx context.Context, exec sqlExecutor, record statusRecord) error {
+	if exec == nil {
+		return fmt.Errorf("sql executor required")
+	}
+	dispatchID := strings.TrimSpace(record.DispatchID)
+	if dispatchID == "" {
+		return fmt.Errorf("dispatch id required")
+	}
+	if record.State == "" {
+		return fmt.Errorf("dispatch state required")
+	}
+
+	enqueuedAt := record.EnqueuedAt.UTC()
+	if enqueuedAt.IsZero() {
+		enqueuedAt = s.now().UTC()
+	}
+	updatedAt := record.UpdatedAt.UTC()
+	if updatedAt.IsZero() {
+		updatedAt = s.now().UTC()
+	}
+	nextRunAt := int64(0)
+	if !record.NextRunAt.IsZero() {
+		nextRunAt = record.NextRunAt.UTC().UnixNano()
+	}
+	expiresAt := updatedAt.Add(s.statusTTL).UnixNano()
+	terminalReason := strings.TrimSpace(record.TerminalReason)
+
+	p := s.placeholder
+	query := fmt.Sprintf(`INSERT INTO %s
+(dispatch_id, state, attempt, enqueued_at, updated_at, next_run_at, terminal_reason, expires_at)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT(dispatch_id) DO UPDATE SET
+state = excluded.state,
+attempt = excluded.attempt,
+enqueued_at = %s.enqueued_at,
+updated_at = excluded.updated_at,
+next_run_at = excluded.next_run_at,
+terminal_reason = excluded.terminal_reason,
+expires_at = excluded.expires_at`, s.statusTable, p(1), p(2), p(3), p(4), p(5), p(6), p(7), p(8), s.statusTable)
+	_, err := exec.ExecContext(ctx, query,
+		dispatchID,
+		string(record.State),
+		record.Attempt,
+		enqueuedAt.UnixNano(),
+		updatedAt.UnixNano(),
+		nextRunAt,
+		terminalReason,
+		expiresAt,
+	)
+	return err
 }
 
 func decodeMessage(payload string) (*job.ExecutionMessage, error) {
