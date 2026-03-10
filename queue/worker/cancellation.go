@@ -105,5 +105,8 @@ func (w *Worker) cancelNackOptions(reason string) queue.NackOptions {
 	if reason == "" {
 		reason = "canceled"
 	}
-	return queue.NackOptions{Reason: reason}
+	return queue.NackOptions{
+		Disposition: queue.NackDispositionCanceled,
+		Reason:      reason,
+	}
 }
