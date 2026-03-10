@@ -238,8 +238,8 @@ worker := worker.NewWorker(adapter, worker.WithConcurrency(4))
 _ = worker.RegisterAll(tasks)
 _ = worker.Start(ctx)
 
-_ = adapter.Enqueue(ctx, msg)
-_ = adapter.EnqueueAfter(ctx, msg, 30*time.Second)
+_, _ = adapter.Enqueue(ctx, msg)
+_, _ = adapter.EnqueueAfter(ctx, msg, 30*time.Second)
 ```
 
 Outbox compatibility wiring:

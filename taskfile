@@ -96,6 +96,33 @@ function dev:test {
     lgr exec -- go test ./...
 }
 
+function dev:test:cross {
+    local tmp
+    local job_root
+    local command_root
+
+    job_root=$(pwd)
+    command_root="$(cd ../go-command && pwd)"
+    tmp=$(mktemp -d)
+
+    cat > "${tmp}/go.work" <<EOF
+go 1.23.4
+use (
+    ${job_root}
+    ${command_root}
+)
+EOF
+
+    lgr I "cross-check go-job queue/command + worker with local go-command"
+    GOWORK="${tmp}/go.work" go test ./queue/command ./queue/worker || return 1
+
+    lgr I "cross-check go-command flow contracts with local go-job workspace"
+    (
+        cd "${command_root}" || exit "$?"
+        GOWORK="${tmp}/go.work" go test ./flow/...
+    ) || return 1
+}
+
 
 function go:mod:update {
     local modules
