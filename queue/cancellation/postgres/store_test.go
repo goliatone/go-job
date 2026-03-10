@@ -106,8 +106,9 @@ func setupStore(t *testing.T) (*testStore, func()) {
 }
 
 func setupStoreWithBatch(t *testing.T, batch int) (*testStore, func()) {
-	db, err := sql.Open("sqlite3", ":memory:")
+	db, err := sql.Open("sqlite3", "file:cancellation_store_test?mode=memory&cache=shared")
 	require.NoError(t, err)
+	db.SetMaxOpenConns(1)
 
 	clock := newManualClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 
