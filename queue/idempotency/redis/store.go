@@ -160,7 +160,7 @@ func (s *Store) Update(ctx context.Context, key string, update idempotency.Updat
 		record.Status = *update.Status
 	}
 	if update.Payload != nil {
-		record.Payload = idempotencyClone(*update.Payload)
+		record.Payload = idempotency.CloneBytes(*update.Payload)
 	}
 	if update.ExpiresAt != nil {
 		record.ExpiresAt = update.ExpiresAt.UTC()
@@ -210,7 +210,7 @@ func newRecord(key string, payload []byte, now time.Time, ttl time.Duration) ide
 	record := idempotency.Record{
 		Key:       key,
 		Status:    idempotency.StatusPending,
-		Payload:   idempotencyClone(payload),
+		Payload:   idempotency.CloneBytes(payload),
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -224,7 +224,7 @@ func encodeRecord(record idempotency.Record) (string, error) {
 	data := recordPayload{
 		Key:       record.Key,
 		Status:    idempotency.DefaultStatus(record.Status),
-		Payload:   idempotencyClone(record.Payload),
+		Payload:   idempotency.CloneBytes(record.Payload),
 		CreatedAt: record.CreatedAt.UTC().UnixNano(),
 		UpdatedAt: record.UpdatedAt.UTC().UnixNano(),
 	}
@@ -249,7 +249,7 @@ func decodeRecord(value string) (idempotency.Record, error) {
 	record := idempotency.Record{
 		Key:       data.Key,
 		Status:    idempotency.DefaultStatus(data.Status),
-		Payload:   idempotencyClone(data.Payload),
+		Payload:   idempotency.CloneBytes(data.Payload),
 		CreatedAt: time.Unix(0, data.CreatedAt).UTC(),
 		UpdatedAt: time.Unix(0, data.UpdatedAt).UTC(),
 	}
@@ -268,13 +268,4 @@ func ttlForRecord(record idempotency.Record, now time.Time) time.Duration {
 		return 0
 	}
 	return ttl
-}
-
-func idempotencyClone(value []byte) []byte {
-	if len(value) == 0 {
-		return nil
-	}
-	out := make([]byte, len(value))
-	copy(out, value)
-	return out
 }

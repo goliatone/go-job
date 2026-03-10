@@ -2,8 +2,6 @@ package redis
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
@@ -11,6 +9,8 @@ import (
 
 	job "github.com/goliatone/go-job"
 	"github.com/goliatone/go-job/queue"
+	"github.com/goliatone/go-job/queue/internal/randutil"
+	"github.com/goliatone/go-job/queue/internal/timeutil"
 )
 
 const (
@@ -283,8 +283,8 @@ func NewStorage(client Client, opts ...Option) *Storage {
 		releaseBatchSize:  defaultReleaseBatchSize,
 		statusTTL:         defaultStatusTTL,
 		now:               time.Now,
-		idFunc:            func() string { return randomHex(16) },
-		tokenFunc:         func() string { return randomHex(16) },
+		idFunc:            func() string { return randutil.Hex(16) },
+		tokenFunc:         func() string { return randutil.Hex(16) },
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -449,8 +449,8 @@ func (s *Storage) Dequeue(ctx context.Context) (*job.ExecutionMessage, queue.Rec
 		return nil, queue.Receipt{}, err
 	}
 
-	availableAt := unixNanoTime(availableAtUnix)
-	createdAt := unixNanoTime(createdAtUnix)
+	availableAt := timeutil.UnixNanoTime(availableAtUnix)
+	createdAt := timeutil.UnixNanoTime(createdAtUnix)
 
 	if err := s.writeStatus(ctx, statusRecord{
 		DispatchID:     id,
@@ -521,7 +521,7 @@ func (s *Storage) Ack(ctx context.Context, receipt queue.Receipt) error {
 	}
 
 	now := s.now().UTC()
-	enqueuedAt := unixNanoTime(createdAtUnix)
+	enqueuedAt := timeutil.UnixNanoTime(createdAtUnix)
 	if enqueuedAt.IsZero() {
 		enqueuedAt = receipt.CreatedAt.UTC()
 	}
@@ -599,7 +599,7 @@ func (s *Storage) Nack(ctx context.Context, receipt queue.Receipt, opts queue.Na
 	if err != nil {
 		return err
 	}
-	enqueuedAt := unixNanoTime(createdAtUnix)
+	enqueuedAt := timeutil.UnixNanoTime(createdAtUnix)
 
 	if opts.Disposition == queue.NackDispositionDeadLetter {
 		return s.writeStatus(ctx, statusRecord{
@@ -614,7 +614,7 @@ func (s *Storage) Nack(ctx context.Context, receipt queue.Receipt, opts queue.Na
 	}
 
 	if opts.Disposition == queue.NackDispositionRetry {
-		availableAt := unixNanoTime(availableAtUnix)
+		availableAt := timeutil.UnixNanoTime(availableAtUnix)
 		state := queue.DispatchStateAccepted
 		nextRunAt := time.Time{}
 		if opts.Delay > 0 {
@@ -668,9 +668,9 @@ func (s *Storage) GetDispatchStatus(ctx context.Context, dispatchID string) (que
 	}
 	status.State = queue.DispatchState(fields[statusFieldState])
 	status.Attempt = parseInt(fields[statusFieldAttempt])
-	status.EnqueuedAt = ptrTime(unixNanoTime(parseInt64(fields[statusFieldEnqueued])))
-	status.UpdatedAt = ptrTime(unixNanoTime(parseInt64(fields[statusFieldUpdated])))
-	status.NextRunAt = ptrTime(unixNanoTime(parseInt64(fields[statusFieldNextRunAt])))
+	status.EnqueuedAt = timeutil.PtrTime(timeutil.UnixNanoTime(parseInt64(fields[statusFieldEnqueued])))
+	status.UpdatedAt = timeutil.PtrTime(timeutil.UnixNanoTime(parseInt64(fields[statusFieldUpdated])))
+	status.NextRunAt = timeutil.PtrTime(timeutil.UnixNanoTime(parseInt64(fields[statusFieldNextRunAt])))
 	status.TerminalReason = strings.TrimSpace(fields[statusFieldReason])
 	return status, nil
 }
@@ -723,7 +723,7 @@ func (s *Storage) ExtendLease(ctx context.Context, receipt queue.Receipt, ttl ti
 		return err
 	}
 
-	enqueuedAt := unixNanoTime(createdAtUnix)
+	enqueuedAt := timeutil.UnixNanoTime(createdAtUnix)
 	if enqueuedAt.IsZero() {
 		enqueuedAt = receipt.CreatedAt.UTC()
 	}
@@ -777,7 +777,7 @@ func (s *Storage) releaseSet(ctx context.Context, key string, max float64, clear
 			return err
 		}
 		now := s.now().UTC()
-		enqueuedAt := unixNanoTime(parseInt64(fields[fieldCreatedAt]))
+		enqueuedAt := timeutil.UnixNanoTime(parseInt64(fields[fieldCreatedAt]))
 		if enqueuedAt.IsZero() {
 			enqueuedAt = now
 		}
@@ -949,30 +949,4 @@ func parseInt64(value string) int64 {
 		return 0
 	}
 	return parsed
-}
-
-func randomHex(size int) string {
-	if size <= 0 {
-		size = 8
-	}
-	buf := make([]byte, size)
-	if _, err := rand.Read(buf); err != nil {
-		return strconv.FormatInt(time.Now().UnixNano(), 10)
-	}
-	return hex.EncodeToString(buf)
-}
-
-func unixNanoTime(ts int64) time.Time {
-	if ts <= 0 {
-		return time.Time{}
-	}
-	return time.Unix(0, ts).UTC()
-}
-
-func ptrTime(value time.Time) *time.Time {
-	if value.IsZero() {
-		return nil
-	}
-	v := value.UTC()
-	return &v
 }

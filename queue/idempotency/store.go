@@ -61,7 +61,8 @@ func IsExpired(record Record, now time.Time) bool {
 	return !record.ExpiresAt.After(now)
 }
 
-func cloneBytes(value []byte) []byte {
+// CloneBytes returns a copy of the provided byte slice.
+func CloneBytes(value []byte) []byte {
 	if len(value) == 0 {
 		return nil
 	}

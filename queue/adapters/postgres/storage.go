@@ -2,17 +2,16 @@ package postgres
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
 	job "github.com/goliatone/go-job"
 	"github.com/goliatone/go-job/queue"
+	"github.com/goliatone/go-job/queue/internal/randutil"
 	"github.com/goliatone/go-job/queue/internal/sqlutil"
+	"github.com/goliatone/go-job/queue/internal/timeutil"
 )
 
 const (
@@ -140,8 +139,8 @@ func NewStorage(db *sql.DB, opts ...Option) *Storage {
 		visibilityTimeout: defaultVisibilityTimeout,
 		statusTTL:         defaultStatusTTL,
 		now:               time.Now,
-		idFunc:            func() string { return randomHex(16) },
-		tokenFunc:         func() string { return randomHex(16) },
+		idFunc:            func() string { return randutil.Hex(16) },
+		tokenFunc:         func() string { return randutil.Hex(16) },
 		placeholder:       placeholderFor(DialectPostgres),
 		useSkipLocked:     true,
 	}
@@ -229,9 +228,9 @@ VALUES (%s, %s, 0, %s, 0, '', %s, %s)`, s.table, p(1), p(2), p(3), p(4), p(5))
 		return queue.EnqueueReceipt{}, err
 	}
 
-	enqueuedAt := unixNanoTime(nowUnix)
+	enqueuedAt := timeutil.UnixNanoTime(nowUnix)
 	state := queue.DispatchStateAccepted
-	nextRunAt := unixNanoTime(availableAt)
+	nextRunAt := timeutil.UnixNanoTime(availableAt)
 	if !nextRunAt.After(now) {
 		nextRunAt = time.Time{}
 	}
@@ -293,7 +292,7 @@ func (s *Storage) Ack(ctx context.Context, receipt queue.Receipt) error {
 	if err != nil {
 		return err
 	}
-	defer rollback(tx)
+	defer sqlutil.Rollback(tx)
 
 	_, attempts, createdAt, err := s.loadForReceipt(ctx, tx, receipt)
 	if err != nil {
@@ -304,7 +303,7 @@ func (s *Storage) Ack(ctx context.Context, receipt queue.Receipt) error {
 	}
 
 	now := s.now().UTC()
-	enqueuedAt := unixNanoTime(createdAt)
+	enqueuedAt := timeutil.UnixNanoTime(createdAt)
 	if enqueuedAt.IsZero() {
 		enqueuedAt = receipt.CreatedAt.UTC()
 	}
@@ -345,7 +344,7 @@ func (s *Storage) Nack(ctx context.Context, receipt queue.Receipt, opts queue.Na
 	if err != nil {
 		return err
 	}
-	defer rollback(tx)
+	defer sqlutil.Rollback(tx)
 
 	payload, attempts, createdAt, err := s.loadForReceipt(ctx, tx, receipt)
 	if err != nil {
@@ -353,7 +352,7 @@ func (s *Storage) Nack(ctx context.Context, receipt queue.Receipt, opts queue.Na
 	}
 
 	now := s.now().UTC()
-	enqueuedAt := unixNanoTime(createdAt)
+	enqueuedAt := timeutil.UnixNanoTime(createdAt)
 	if enqueuedAt.IsZero() {
 		enqueuedAt = receipt.CreatedAt.UTC()
 	}
@@ -506,9 +505,9 @@ WHERE dispatch_id = %s AND expires_at > %s`, s.statusTable, p(1), p(2))
 
 	status.State = queue.DispatchState(state)
 	status.Attempt = attempt
-	status.EnqueuedAt = ptrTime(unixNanoTime(enqueuedAt))
-	status.UpdatedAt = ptrTime(unixNanoTime(updatedAt))
-	status.NextRunAt = ptrTime(unixNanoTime(nextRunAt))
+	status.EnqueuedAt = timeutil.PtrTime(timeutil.UnixNanoTime(enqueuedAt))
+	status.UpdatedAt = timeutil.PtrTime(timeutil.UnixNanoTime(updatedAt))
+	status.NextRunAt = timeutil.PtrTime(timeutil.UnixNanoTime(nextRunAt))
 	if terminalReason.Valid {
 		status.TerminalReason = terminalReason.String
 	}
@@ -520,7 +519,7 @@ func (s *Storage) dequeueSkipLocked(ctx context.Context) (*job.ExecutionMessage,
 	if err != nil {
 		return nil, queue.Receipt{}, err
 	}
-	defer rollback(tx)
+	defer sqlutil.Rollback(tx)
 
 	now := s.now()
 	nowUnix := now.UnixNano()
@@ -563,7 +562,7 @@ LIMIT 1`, s.table, p(1), p(2))
 		DispatchID:     id,
 		State:          queue.DispatchStateRunning,
 		Attempt:        attempts,
-		EnqueuedAt:     unixNanoTime(createdAt),
+		EnqueuedAt:     timeutil.UnixNanoTime(createdAt),
 		UpdatedAt:      now,
 		NextRunAt:      time.Time{},
 		TerminalReason: "",
@@ -580,8 +579,8 @@ LIMIT 1`, s.table, p(1), p(2))
 		Token:       token,
 		Attempts:    attempts,
 		LeasedAt:    now,
-		AvailableAt: unixNanoTime(availableAt),
-		CreatedAt:   unixNanoTime(createdAt),
+		AvailableAt: timeutil.UnixNanoTime(availableAt),
+		CreatedAt:   timeutil.UnixNanoTime(createdAt),
 		LastError:   lastError.String,
 	}, nil
 }
@@ -591,7 +590,7 @@ func (s *Storage) dequeueCompatible(ctx context.Context) (*job.ExecutionMessage,
 	if err != nil {
 		return nil, queue.Receipt{}, err
 	}
-	defer rollback(tx)
+	defer sqlutil.Rollback(tx)
 
 	now := s.now()
 	nowUnix := now.UnixNano()
@@ -639,7 +638,7 @@ WHERE id = %s AND (leased_until = 0 OR leased_until <= %s)`, s.table, p(1), p(2)
 		DispatchID:     id,
 		State:          queue.DispatchStateRunning,
 		Attempt:        attempts,
-		EnqueuedAt:     unixNanoTime(createdAt),
+		EnqueuedAt:     timeutil.UnixNanoTime(createdAt),
 		UpdatedAt:      now,
 		NextRunAt:      time.Time{},
 		TerminalReason: "",
@@ -656,8 +655,8 @@ WHERE id = %s AND (leased_until = 0 OR leased_until <= %s)`, s.table, p(1), p(2)
 		Token:       token,
 		Attempts:    attempts,
 		LeasedAt:    now,
-		AvailableAt: unixNanoTime(availableAt),
-		CreatedAt:   unixNanoTime(createdAt),
+		AvailableAt: timeutil.UnixNanoTime(availableAt),
+		CreatedAt:   timeutil.UnixNanoTime(createdAt),
 		LastError:   lastError.String,
 	}, nil
 }
@@ -788,39 +787,6 @@ expires_at = excluded.expires_at`, s.statusTable, p(1), p(2), p(3), p(4), p(5), 
 
 func decodeMessage(payload string) (*job.ExecutionMessage, error) {
 	return queue.DecodeExecutionMessage([]byte(payload))
-}
-
-func rollback(tx *sql.Tx) {
-	if tx == nil {
-		return
-	}
-	_ = tx.Rollback()
-}
-
-func unixNanoTime(ts int64) time.Time {
-	if ts <= 0 {
-		return time.Time{}
-	}
-	return time.Unix(0, ts).UTC()
-}
-
-func randomHex(size int) string {
-	if size <= 0 {
-		size = 8
-	}
-	buf := make([]byte, size)
-	if _, err := rand.Read(buf); err != nil {
-		return strconv.FormatInt(time.Now().UnixNano(), 10)
-	}
-	return hex.EncodeToString(buf)
-}
-
-func ptrTime(value time.Time) *time.Time {
-	if value.IsZero() {
-		return nil
-	}
-	v := value.UTC()
-	return &v
 }
 
 func (s *Storage) validateIdentifiers() error {

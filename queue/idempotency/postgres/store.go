@@ -130,7 +130,7 @@ func (s *Store) Acquire(ctx context.Context, key string, ttl time.Duration) (ide
 	if err != nil {
 		return idempotency.Record{}, false, err
 	}
-	defer rollback(tx)
+	defer sqlutil.Rollback(tx)
 
 	now := s.now().UTC()
 	next := newRecord(key, nil, now, ttl)
@@ -202,7 +202,7 @@ func (s *Store) Get(ctx context.Context, key string) (idempotency.Record, bool, 
 	if err != nil {
 		return idempotency.Record{}, false, err
 	}
-	defer rollback(tx)
+	defer sqlutil.Rollback(tx)
 
 	record, found, err := s.selectRecord(ctx, tx, key)
 	if err != nil {
@@ -245,7 +245,7 @@ func (s *Store) Update(ctx context.Context, key string, update idempotency.Updat
 	if err != nil {
 		return err
 	}
-	defer rollback(tx)
+	defer sqlutil.Rollback(tx)
 
 	record, found, err := s.selectRecord(ctx, tx, key)
 	if err != nil {
@@ -260,7 +260,7 @@ func (s *Store) Update(ctx context.Context, key string, update idempotency.Updat
 		record.Status = *update.Status
 	}
 	if update.Payload != nil {
-		record.Payload = idempotencyClone(*update.Payload)
+		record.Payload = idempotency.CloneBytes(*update.Payload)
 	}
 	if update.ExpiresAt != nil {
 		record.ExpiresAt = update.ExpiresAt.UTC()
@@ -384,7 +384,7 @@ func newRecord(key string, payload []byte, now time.Time, ttl time.Duration) ide
 	record := idempotency.Record{
 		Key:       key,
 		Status:    idempotency.StatusPending,
-		Payload:   idempotencyClone(payload),
+		Payload:   idempotency.CloneBytes(payload),
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -417,22 +417,6 @@ func decodePayload(payload string) []byte {
 		return nil
 	}
 	return decoded
-}
-
-func rollback(tx *sql.Tx) {
-	if tx == nil {
-		return
-	}
-	_ = tx.Rollback()
-}
-
-func idempotencyClone(value []byte) []byte {
-	if len(value) == 0 {
-		return nil
-	}
-	out := make([]byte, len(value))
-	copy(out, value)
-	return out
 }
 
 func (s *Store) validateIdentifier() error {
