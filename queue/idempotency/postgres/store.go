@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/goliatone/go-job/queue/idempotency"
@@ -86,6 +87,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("postgres idempotency store not configured")
 	}
+	if err := s.validateIdentifier(); err != nil {
+		return err
+	}
 	for _, stmt := range schemaStatements(s.table) {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return err
@@ -98,6 +102,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 func (s *Store) Cleanup(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("postgres idempotency store not configured")
+	}
+	if err := s.validateIdentifier(); err != nil {
+		return err
 	}
 	for _, stmt := range dropStatements(s.table) {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
@@ -112,6 +119,9 @@ func (s *Store) Acquire(ctx context.Context, key string, ttl time.Duration) (ide
 	if s == nil || s.db == nil {
 		return idempotency.Record{}, false, fmt.Errorf("postgres idempotency store not configured")
 	}
+	if err := s.validateIdentifier(); err != nil {
+		return idempotency.Record{}, false, err
+	}
 	if key == "" {
 		return idempotency.Record{}, false, fmt.Errorf("idempotency key required")
 	}
@@ -122,32 +132,52 @@ func (s *Store) Acquire(ctx context.Context, key string, ttl time.Duration) (ide
 	}
 	defer rollback(tx)
 
-	now := s.now()
+	now := s.now().UTC()
+	next := newRecord(key, nil, now, ttl)
+
+	created, err := s.insertRecordIfMissing(ctx, tx, next)
+	if err != nil {
+		return idempotency.Record{}, false, err
+	}
+	if created {
+		if err := tx.Commit(); err != nil {
+			return idempotency.Record{}, false, err
+		}
+		return next, true, nil
+	}
+
 	record, found, err := s.selectRecord(ctx, tx, key)
 	if err != nil {
 		return idempotency.Record{}, false, err
 	}
-
 	if !found {
-		record = newRecord(key, nil, now, ttl)
-		if err := s.insertRecord(ctx, tx, record); err != nil {
+		created, err := s.insertRecordIfMissing(ctx, tx, next)
+		if err != nil {
 			return idempotency.Record{}, false, err
 		}
-		if err := tx.Commit(); err != nil {
+		if created {
+			if err := tx.Commit(); err != nil {
+				return idempotency.Record{}, false, err
+			}
+			return next, true, nil
+		}
+		record, found, err = s.selectRecord(ctx, tx, key)
+		if err != nil {
 			return idempotency.Record{}, false, err
 		}
-		return record, true, nil
+		if !found {
+			return idempotency.Record{}, false, idempotency.ErrNotFound
+		}
 	}
 
 	if idempotency.IsExpired(record, now) {
-		record = newRecord(key, nil, now, ttl)
-		if err := s.updateRecord(ctx, tx, record); err != nil {
+		if err := s.updateRecord(ctx, tx, next); err != nil {
 			return idempotency.Record{}, false, err
 		}
 		if err := tx.Commit(); err != nil {
 			return idempotency.Record{}, false, err
 		}
-		return record, true, nil
+		return next, true, nil
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -160,6 +190,9 @@ func (s *Store) Acquire(ctx context.Context, key string, ttl time.Duration) (ide
 func (s *Store) Get(ctx context.Context, key string) (idempotency.Record, bool, error) {
 	if s == nil || s.db == nil {
 		return idempotency.Record{}, false, fmt.Errorf("postgres idempotency store not configured")
+	}
+	if err := s.validateIdentifier(); err != nil {
+		return idempotency.Record{}, false, err
 	}
 	if key == "" {
 		return idempotency.Record{}, false, fmt.Errorf("idempotency key required")
@@ -200,6 +233,9 @@ func (s *Store) Get(ctx context.Context, key string) (idempotency.Record, bool, 
 func (s *Store) Update(ctx context.Context, key string, update idempotency.Update) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("postgres idempotency store not configured")
+	}
+	if err := s.validateIdentifier(); err != nil {
+		return err
 	}
 	if key == "" {
 		return fmt.Errorf("idempotency key required")
@@ -252,6 +288,9 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("postgres idempotency store not configured")
 	}
+	if err := s.validateIdentifier(); err != nil {
+		return err
+	}
 	if key == "" {
 		return fmt.Errorf("idempotency key required")
 	}
@@ -299,6 +338,26 @@ func (s *Store) insertRecord(ctx context.Context, tx *sql.Tx, record idempotency
 VALUES (%s, %s, %s, %s, %s, %s)`, s.table, p(1), p(2), p(3), p(4), p(5), p(6))
 	_, err := tx.ExecContext(ctx, query, record.Key, string(idempotency.DefaultStatus(record.Status)), encodePayload(record.Payload), expiresAtValue(record), record.CreatedAt.UTC().UnixNano(), record.UpdatedAt.UTC().UnixNano())
 	return err
+}
+
+func (s *Store) insertRecordIfMissing(ctx context.Context, tx *sql.Tx, record idempotency.Record) (bool, error) {
+	p := s.placeholder
+	query := fmt.Sprintf(`INSERT INTO %s (key, status, payload, expires_at, created_at, updated_at)
+VALUES (%s, %s, %s, %s, %s, %s)
+ON CONFLICT (key) DO NOTHING`, s.table, p(1), p(2), p(3), p(4), p(5), p(6))
+	res, err := tx.ExecContext(ctx, query,
+		record.Key,
+		string(idempotency.DefaultStatus(record.Status)),
+		encodePayload(record.Payload),
+		expiresAtValue(record),
+		record.CreatedAt.UTC().UnixNano(),
+		record.UpdatedAt.UTC().UnixNano(),
+	)
+	if err != nil {
+		return false, err
+	}
+	affected, _ := res.RowsAffected()
+	return affected > 0, nil
 }
 
 func (s *Store) updateRecord(ctx context.Context, tx *sql.Tx, record idempotency.Record) error {
@@ -374,4 +433,43 @@ func idempotencyClone(value []byte) []byte {
 	out := make([]byte, len(value))
 	copy(out, value)
 	return out
+}
+
+func (s *Store) validateIdentifier() error {
+	return validateSQLIdentifier("idempotency table", s.table)
+}
+
+func validateSQLIdentifier(label, value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("%s identifier required", label)
+	}
+	parts := strings.Split(value, ".")
+	for _, part := range parts {
+		if !isSQLIdentifierPart(part) {
+			return fmt.Errorf("invalid %s identifier %q", label, value)
+		}
+	}
+	return nil
+}
+
+func isSQLIdentifierPart(part string) bool {
+	if part == "" {
+		return false
+	}
+	for idx := 0; idx < len(part); idx++ {
+		ch := part[idx]
+		isLetter := (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+		isDigit := ch >= '0' && ch <= '9'
+		if idx == 0 {
+			if !isLetter && ch != '_' {
+				return false
+			}
+			continue
+		}
+		if !isLetter && !isDigit && ch != '_' {
+			return false
+		}
+	}
+	return true
 }
