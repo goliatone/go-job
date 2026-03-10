@@ -18,28 +18,8 @@ type ConfigProvider interface {
 	JobConfig() job.Config
 }
 
-type registerConfig struct {
-	strictDuplicates bool
-}
-
-// RegisterOption customizes queue command registration behavior.
-type RegisterOption func(*registerConfig)
-
-// WithStrictDuplicateRegistration controls duplicate command_id behavior.
-// When enabled, duplicate registrations return an explicit conflict error.
-func WithStrictDuplicateRegistration(enabled bool) RegisterOption {
-	return func(cfg *registerConfig) {
-		cfg.strictDuplicates = enabled
-	}
-}
-
 // RegisterCommand registers a command with the queue registry.
 func RegisterCommand[T any](reg *Registry, cmd command.Commander[T]) error {
-	return RegisterCommandWithOptions(reg, cmd)
-}
-
-// RegisterCommandWithOptions registers a command with queue registration options.
-func RegisterCommandWithOptions[T any](reg *Registry, cmd command.Commander[T], opts ...RegisterOption) error {
 	if reg == nil {
 		return fmt.Errorf("command registry not configured")
 	}
@@ -48,16 +28,11 @@ func RegisterCommandWithOptions[T any](reg *Registry, cmd command.Commander[T], 
 	}
 
 	meta := command.MessageTypeForCommand(cmd)
-	return RegisterCommandByTypeWithOptions(reg, cmd, meta, opts...)
+	return RegisterCommandByType(reg, cmd, meta)
 }
 
 // RegisterCommandByType registers a command using resolver metadata.
 func RegisterCommandByType(reg *Registry, cmd any, meta command.CommandMeta) error {
-	return RegisterCommandByTypeWithOptions(reg, cmd, meta)
-}
-
-// RegisterCommandByTypeWithOptions registers a command using resolver metadata and registration options.
-func RegisterCommandByTypeWithOptions(reg *Registry, cmd any, meta command.CommandMeta, opts ...RegisterOption) error {
 	if reg == nil {
 		return fmt.Errorf("command registry not configured")
 	}
@@ -83,18 +58,8 @@ func RegisterCommandByTypeWithOptions(reg *Registry, cmd any, meta command.Comma
 		return err
 	}
 
-	config := registerConfig{}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(&config)
-		}
-	}
-
 	if _, ok := reg.Get(messageType); ok {
-		if config.strictDuplicates {
-			return fmt.Errorf("queued command registration conflict for %q", messageType)
-		}
-		return nil
+		return fmt.Errorf("queued command registration conflict for %q", messageType)
 	}
 
 	entry := Entry{

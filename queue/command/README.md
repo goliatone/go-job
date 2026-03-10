@@ -14,6 +14,9 @@
 You can register commands with the queue registry only, or attach the queue resolver to
 `go-command` so queue registration happens during `Registry.Initialize()`.
 
+Choose one registration path per command. Registering the same `command_id` twice returns
+an explicit conflict error.
+
 ```go
 cmdReg := queuecmd.NewRegistry()
 
@@ -76,21 +79,24 @@ Use `go-command` to get the id from the message type, then enqueue with params.
 
 ```go
 id := gocmd.GetMessageType(ExportMessage{})
-_ = queuecmd.Enqueue(ctx, enqueuer, cmdReg, id, map[string]any{
+receipt, _ := queuecmd.Enqueue(ctx, enqueuer, cmdReg, id, map[string]any{
 	"export_id": "123",
 })
+_ = receipt.DispatchID
 ```
 
 Scheduled variants are also available:
 
 ```go
-_ = queuecmd.EnqueueAt(ctx, enqueuer, cmdReg, id, map[string]any{
+r1, _ := queuecmd.EnqueueAt(ctx, enqueuer, cmdReg, id, map[string]any{
 	"export_id": "123",
 }, time.Now().Add(10*time.Minute))
+_ = r1.DispatchID
 
-_ = queuecmd.EnqueueAfter(ctx, enqueuer, cmdReg, id, map[string]any{
+r2, _ := queuecmd.EnqueueAfter(ctx, enqueuer, cmdReg, id, map[string]any{
 	"export_id": "123",
 }, 30*time.Second)
+_ = r2.DispatchID
 ```
 
 ## Parameter Decoding
@@ -157,9 +163,10 @@ job via `queuecmd.Enqueue`:
 
 ```go
 id := gocmd.GetMessageType(ExportMessage{})
-_ = queuecmd.Enqueue(ctx, enqueuer, cmdReg, id, map[string]any{
+receipt, _ := queuecmd.Enqueue(ctx, enqueuer, cmdReg, id, map[string]any{
 	"export_id": "123",
 })
+_ = receipt.DispatchID
 ```
 
 ## Optional Metadata
@@ -185,6 +192,6 @@ When present, the config is attached to the task and used by the worker.
 - `LocalWorkerConfig`
 - `NewLocalWorker(dequeuer queue.Dequeuer, reg *Registry, cfg LocalWorkerConfig) (*worker.Worker, error)`
 - `StartLocalWorker(ctx context.Context, dequeuer queue.Dequeuer, reg *Registry, cfg LocalWorkerConfig) (*worker.Worker, error)`
-- `Enqueue(ctx context.Context, enq queue.Enqueuer, reg *Registry, id string, params map[string]any) error`
-- `EnqueueAt(ctx context.Context, enq queue.ScheduledEnqueuer, reg *Registry, id string, params map[string]any, at time.Time) error`
-- `EnqueueAfter(ctx context.Context, enq queue.ScheduledEnqueuer, reg *Registry, id string, params map[string]any, delay time.Duration) error`
+- `Enqueue(ctx context.Context, enq queue.Enqueuer, reg *Registry, id string, params map[string]any) (queue.EnqueueReceipt, error)`
+- `EnqueueAt(ctx context.Context, enq queue.ScheduledEnqueuer, reg *Registry, id string, params map[string]any, at time.Time) (queue.EnqueueReceipt, error)`
+- `EnqueueAfter(ctx context.Context, enq queue.ScheduledEnqueuer, reg *Registry, id string, params map[string]any, delay time.Duration) (queue.EnqueueReceipt, error)`

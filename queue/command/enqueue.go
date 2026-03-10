@@ -52,21 +52,18 @@ type dedupReceiptPayload struct {
 }
 
 // Enqueue validates the command id and enqueues a background job.
-func Enqueue(ctx context.Context, enqueuer queue.Enqueuer, reg *Registry, id string, params map[string]any) error {
-	_, err := EnqueueWithOptions(ctx, enqueuer, reg, id, params, EnqueueOptions{})
-	return err
+func Enqueue(ctx context.Context, enqueuer queue.Enqueuer, reg *Registry, id string, params map[string]any) (queue.EnqueueReceipt, error) {
+	return EnqueueWithOptions(ctx, enqueuer, reg, id, params, EnqueueOptions{})
 }
 
 // EnqueueAt validates the command id and schedules a background job.
-func EnqueueAt(ctx context.Context, enqueuer queue.ScheduledEnqueuer, reg *Registry, id string, params map[string]any, at time.Time) error {
-	_, err := EnqueueAtWithOptions(ctx, enqueuer, reg, id, params, at, EnqueueOptions{})
-	return err
+func EnqueueAt(ctx context.Context, enqueuer queue.ScheduledEnqueuer, reg *Registry, id string, params map[string]any, at time.Time) (queue.EnqueueReceipt, error) {
+	return EnqueueAtWithOptions(ctx, enqueuer, reg, id, params, at, EnqueueOptions{})
 }
 
 // EnqueueAfter validates the command id and schedules a delayed background job.
-func EnqueueAfter(ctx context.Context, enqueuer queue.ScheduledEnqueuer, reg *Registry, id string, params map[string]any, delay time.Duration) error {
-	_, err := EnqueueAfterWithOptions(ctx, enqueuer, reg, id, params, delay, EnqueueOptions{})
-	return err
+func EnqueueAfter(ctx context.Context, enqueuer queue.ScheduledEnqueuer, reg *Registry, id string, params map[string]any, delay time.Duration) (queue.EnqueueReceipt, error) {
+	return EnqueueAfterWithOptions(ctx, enqueuer, reg, id, params, delay, EnqueueOptions{})
 }
 
 // EnqueueWithOptions validates command enqueue inputs and returns queue acceptance metadata.
@@ -105,9 +102,13 @@ func EnqueueWithOptions(ctx context.Context, enqueuer queue.Enqueuer, reg *Regis
 
 // EnqueueAtWithOptions validates command enqueue inputs for explicit scheduled execution.
 func EnqueueAtWithOptions(ctx context.Context, enqueuer queue.ScheduledEnqueuer, reg *Registry, id string, params map[string]any, at time.Time, opts EnqueueOptions) (queue.EnqueueReceipt, error) {
-	opts.RunAt = nil
-	opts.Delay = 0
+	if err := validateExplicitScheduleOptions(opts); err != nil {
+		return queue.EnqueueReceipt{}, err
+	}
 	if err := validateEnqueueInputs(enqueuer, reg, id); err != nil {
+		return queue.EnqueueReceipt{}, err
+	}
+	if err := validateRunAt(at); err != nil {
 		return queue.EnqueueReceipt{}, err
 	}
 	if err := validateOptions(opts); err != nil {
@@ -127,7 +128,7 @@ func EnqueueAtWithOptions(ctx context.Context, enqueuer queue.ScheduledEnqueuer,
 		return *shortCircuit, nil
 	}
 
-	receipt, err := enqueueAtWithReceipt(ctx, enqueuer, msg, at)
+	receipt, err := enqueuer.EnqueueAt(ctx, msg, at)
 	if err != nil {
 		rollbackDedup(ctx, dedup)
 		return queue.EnqueueReceipt{}, err
@@ -141,9 +142,13 @@ func EnqueueAtWithOptions(ctx context.Context, enqueuer queue.ScheduledEnqueuer,
 
 // EnqueueAfterWithOptions validates command enqueue inputs for explicit delayed execution.
 func EnqueueAfterWithOptions(ctx context.Context, enqueuer queue.ScheduledEnqueuer, reg *Registry, id string, params map[string]any, delay time.Duration, opts EnqueueOptions) (queue.EnqueueReceipt, error) {
-	opts.RunAt = nil
-	opts.Delay = 0
+	if err := validateExplicitScheduleOptions(opts); err != nil {
+		return queue.EnqueueReceipt{}, err
+	}
 	if err := validateEnqueueInputs(enqueuer, reg, id); err != nil {
+		return queue.EnqueueReceipt{}, err
+	}
+	if err := validateDelay(delay); err != nil {
 		return queue.EnqueueReceipt{}, err
 	}
 	if err := validateOptions(opts); err != nil {
@@ -163,7 +168,7 @@ func EnqueueAfterWithOptions(ctx context.Context, enqueuer queue.ScheduledEnqueu
 		return *shortCircuit, nil
 	}
 
-	receipt, err := enqueueAfterWithReceipt(ctx, enqueuer, msg, delay)
+	receipt, err := enqueuer.EnqueueAfter(ctx, msg, delay)
 	if err != nil {
 		rollbackDedup(ctx, dedup)
 		return queue.EnqueueReceipt{}, err
@@ -252,11 +257,13 @@ func validateOptions(opts EnqueueOptions) error {
 	if opts.Delay != 0 && opts.RunAt != nil {
 		return fmt.Errorf("delay and run_at are mutually exclusive")
 	}
-	if opts.Delay < 0 {
-		return fmt.Errorf("delay must be >= 0")
+	if err := validateDelay(opts.Delay); err != nil {
+		return err
 	}
-	if opts.RunAt != nil && !opts.RunAt.After(time.Now()) {
-		return fmt.Errorf("run_at must be in the future")
+	if opts.RunAt != nil {
+		if err := validateRunAt(*opts.RunAt); err != nil {
+			return err
+		}
 	}
 
 	policy := normalizeDedupPolicy(opts.DedupPolicy)
@@ -303,46 +310,40 @@ func enqueueWithSchedule(ctx context.Context, enqueuer queue.Enqueuer, msg *job.
 		if !ok {
 			return queue.EnqueueReceipt{}, queue.ErrScheduledEnqueueUnsupported
 		}
-		return enqueueAtWithReceipt(ctx, scheduler, msg, *runAt)
+		return scheduler.EnqueueAt(ctx, msg, *runAt)
 	}
 	if delay != 0 {
 		scheduler, ok := enqueuer.(queue.ScheduledEnqueuer)
 		if !ok {
 			return queue.EnqueueReceipt{}, queue.ErrScheduledEnqueueUnsupported
 		}
-		return enqueueAfterWithReceipt(ctx, scheduler, msg, delay)
+		return scheduler.EnqueueAfter(ctx, msg, delay)
 	}
-	return enqueueWithReceipt(ctx, enqueuer, msg)
+	return enqueuer.Enqueue(ctx, msg)
 }
 
-func enqueueWithReceipt(ctx context.Context, enqueuer queue.Enqueuer, msg *job.ExecutionMessage) (queue.EnqueueReceipt, error) {
-	if receiver, ok := enqueuer.(queue.ReceiptEnqueuer); ok {
-		return receiver.EnqueueWithReceipt(ctx, msg)
+func validateRunAt(at time.Time) error {
+	if !at.After(time.Now()) {
+		return fmt.Errorf("run_at must be in the future")
 	}
-	if err := enqueuer.Enqueue(ctx, msg); err != nil {
-		return queue.EnqueueReceipt{}, err
-	}
-	return queue.EnqueueReceipt{}, nil
+	return nil
 }
 
-func enqueueAtWithReceipt(ctx context.Context, enqueuer queue.ScheduledEnqueuer, msg *job.ExecutionMessage, at time.Time) (queue.EnqueueReceipt, error) {
-	if receiver, ok := enqueuer.(queue.ReceiptScheduledEnqueuer); ok {
-		return receiver.EnqueueAtWithReceipt(ctx, msg, at)
+func validateDelay(delay time.Duration) error {
+	if delay < 0 {
+		return fmt.Errorf("delay must be >= 0")
 	}
-	if err := enqueuer.EnqueueAt(ctx, msg, at); err != nil {
-		return queue.EnqueueReceipt{}, err
-	}
-	return queue.EnqueueReceipt{}, nil
+	return nil
 }
 
-func enqueueAfterWithReceipt(ctx context.Context, enqueuer queue.ScheduledEnqueuer, msg *job.ExecutionMessage, delay time.Duration) (queue.EnqueueReceipt, error) {
-	if receiver, ok := enqueuer.(queue.ReceiptScheduledEnqueuer); ok {
-		return receiver.EnqueueAfterWithReceipt(ctx, msg, delay)
+func validateExplicitScheduleOptions(opts EnqueueOptions) error {
+	if opts.Delay != 0 {
+		return fmt.Errorf("delay option is not allowed with explicit schedule variants")
 	}
-	if err := enqueuer.EnqueueAfter(ctx, msg, delay); err != nil {
-		return queue.EnqueueReceipt{}, err
+	if opts.RunAt != nil {
+		return fmt.Errorf("run_at option is not allowed with explicit schedule variants")
 	}
-	return queue.EnqueueReceipt{}, nil
+	return nil
 }
 
 func prepareDedup(ctx context.Context, commandID string, opts EnqueueOptions) (dedupResolution, *queue.EnqueueReceipt, error) {

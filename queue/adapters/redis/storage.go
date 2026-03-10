@@ -122,24 +122,12 @@ func NewStorage(client Client, opts ...Option) *Storage {
 }
 
 // Enqueue stores a message and enqueues it for delivery.
-func (s *Storage) Enqueue(ctx context.Context, msg *job.ExecutionMessage) error {
-	_, err := s.EnqueueWithReceipt(ctx, msg)
-	return err
-}
-
-// EnqueueWithReceipt stores a message and returns dispatch metadata.
-func (s *Storage) EnqueueWithReceipt(ctx context.Context, msg *job.ExecutionMessage) (queue.EnqueueReceipt, error) {
-	return s.EnqueueAtWithReceipt(ctx, msg, s.now())
+func (s *Storage) Enqueue(ctx context.Context, msg *job.ExecutionMessage) (queue.EnqueueReceipt, error) {
+	return s.EnqueueAt(ctx, msg, s.now())
 }
 
 // EnqueueAt stores a message and schedules it for delivery at the provided time.
-func (s *Storage) EnqueueAt(ctx context.Context, msg *job.ExecutionMessage, at time.Time) error {
-	_, err := s.EnqueueAtWithReceipt(ctx, msg, at)
-	return err
-}
-
-// EnqueueAtWithReceipt stores a message and schedules it for delivery at the provided time.
-func (s *Storage) EnqueueAtWithReceipt(ctx context.Context, msg *job.ExecutionMessage, at time.Time) (queue.EnqueueReceipt, error) {
+func (s *Storage) EnqueueAt(ctx context.Context, msg *job.ExecutionMessage, at time.Time) (queue.EnqueueReceipt, error) {
 	if s == nil || s.client == nil {
 		return queue.EnqueueReceipt{}, fmt.Errorf("redis storage not configured")
 	}
@@ -183,18 +171,12 @@ func (s *Storage) EnqueueAtWithReceipt(ctx context.Context, msg *job.ExecutionMe
 }
 
 // EnqueueAfter stores a message and schedules it after the provided delay.
-func (s *Storage) EnqueueAfter(ctx context.Context, msg *job.ExecutionMessage, delay time.Duration) error {
-	_, err := s.EnqueueAfterWithReceipt(ctx, msg, delay)
-	return err
-}
-
-// EnqueueAfterWithReceipt stores a message and schedules it after the provided delay.
-func (s *Storage) EnqueueAfterWithReceipt(ctx context.Context, msg *job.ExecutionMessage, delay time.Duration) (queue.EnqueueReceipt, error) {
+func (s *Storage) EnqueueAfter(ctx context.Context, msg *job.ExecutionMessage, delay time.Duration) (queue.EnqueueReceipt, error) {
 	at := s.now()
 	if delay > 0 {
 		at = at.Add(delay)
 	}
-	return s.EnqueueAtWithReceipt(ctx, msg, at)
+	return s.EnqueueAt(ctx, msg, at)
 }
 
 // Dequeue leases the next available message.
@@ -355,7 +337,6 @@ func (s *Storage) Nack(ctx context.Context, receipt queue.Receipt, opts queue.Na
 func (s *Storage) GetDispatchStatus(ctx context.Context, dispatchID string) (queue.DispatchStatus, error) {
 	status := queue.DispatchStatus{
 		DispatchID: strings.TrimSpace(dispatchID),
-		State:      queue.DispatchStateUnknown,
 	}
 	if s == nil || s.client == nil {
 		return status, fmt.Errorf("redis storage not configured")
