@@ -1,5 +1,33 @@
 # Changelog
 
+# [0.18.0](https://github.com/goliatone/go-job/compare/v0.17.0...v0.18.0) - (2026-03-10)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Dequeue redis strategy ([15a3864](https://github.com/goliatone/go-job/commit/15a38644ee5b03a8d47fe59afe7609bb322f7bd9))  - (goliatone)
+- Redis keys include lease seq and prefix ([825de59](https://github.com/goliatone/go-job/commit/825de599d2de03357c41c2565c897fb0f517ebc9))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.18.0 ([5f7900f](https://github.com/goliatone/go-job/commit/5f7900f64627bfe7a8c89d0ef028917e6ef6fd00))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Jitter to worker retry ([9ffbb02](https://github.com/goliatone/go-job/commit/9ffbb0201432bf4a767e6acc494360d3689763d8))  - (goliatone)
+- Better error handling ([63885dd](https://github.com/goliatone/go-job/commit/63885dd98eeb325930f05a913c7eed1375b74ebf))  - (goliatone)
+- Cancelation postgres validation ([6e49f83](https://github.com/goliatone/go-job/commit/6e49f8397d9895a5d568516ea0dd185d62b320c4))  - (goliatone)
+- Create index in cancelation table ([98113e3](https://github.com/goliatone/go-job/commit/98113e39c02c0572cc20f6d485d544a27ebc3aca))  - (goliatone)
+- Eval to redis client ([40a078b](https://github.com/goliatone/go-job/commit/40a078b53d80f8f839d2087cd93f6ce6ddaaa282))  - (goliatone)
+- Validate storage identifiers ([13c17c5](https://github.com/goliatone/go-job/commit/13c17c576f3347e226430b3500364fde191dacd8))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.17.0 ([5daf5f6](https://github.com/goliatone/go-job/commit/5daf5f67ca1133ecc135cd7fdb90ef1d583fbe1c))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update tests ([f07cc38](https://github.com/goliatone/go-job/commit/f07cc38cf832a1703725eb20fcc089178da217e6))  - (goliatone)
+
 # [0.17.0](https://github.com/goliatone/go-job/compare/v0.16.0...v0.17.0) - (2026-03-10)
 
 ## <!-- 1 -->🐛 Bug Fixes
