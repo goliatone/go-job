@@ -34,6 +34,166 @@ const (
 	statusFieldUpdated   = "updated_at"
 	statusFieldNextRunAt = "next_run_at"
 	statusFieldReason    = "terminal_reason"
+
+	scriptErrTokenMissing   = "ERR_TOKEN_MISSING"
+	scriptErrTokenMismatch  = "ERR_TOKEN_MISMATCH"
+	scriptErrMissingPayload = "ERR_MISSING_PAYLOAD"
+)
+
+var (
+	// DequeueScript atomically releases due entries and leases one ready entry.
+	DequeueScript = `
+local ready = KEYS[1]
+local delayed = KEYS[2]
+local inflight = KEYS[3]
+local msgPrefix = KEYS[4]
+local leaseSeq = KEYS[5]
+
+local now = tonumber(ARGV[1])
+local batch = tonumber(ARGV[2])
+local leaseUntil = tonumber(ARGV[3])
+
+local delayedDue = redis.call('ZRANGEBYSCORE', delayed, '-inf', now, 'LIMIT', 0, batch)
+for _, id in ipairs(delayedDue) do
+	redis.call('ZREM', delayed, id)
+	redis.call('LPUSH', ready, id)
+end
+
+local inflightDue = redis.call('ZRANGEBYSCORE', inflight, '-inf', now, 'LIMIT', 0, batch)
+for _, id in ipairs(inflightDue) do
+	redis.call('ZREM', inflight, id)
+	local msgKey = msgPrefix .. id
+	redis.call('HSET', msgKey, 'token', '', 'leased_at', '0', 'updated_at', tostring(now))
+	redis.call('LPUSH', ready, id)
+end
+
+local id = redis.call('RPOP', ready)
+if not id then
+	return {}
+end
+
+local msgKey = msgPrefix .. id
+local payload = redis.call('HGET', msgKey, 'payload')
+if not payload or payload == '' then
+	return { '` + scriptErrMissingPayload + `', id }
+end
+
+local attempts = redis.call('HINCRBY', msgKey, 'attempts', 1)
+local availableAt = redis.call('HGET', msgKey, 'available_at') or '0'
+local createdAt = redis.call('HGET', msgKey, 'created_at') or '0'
+local lastError = redis.call('HGET', msgKey, 'last_error') or ''
+local seq = redis.call('INCR', leaseSeq)
+local token = redis.sha1hex(id .. ':' .. tostring(now) .. ':' .. tostring(seq))
+
+redis.call('HSET', msgKey, 'token', token, 'leased_at', tostring(now), 'updated_at', tostring(now))
+redis.call('ZADD', inflight, leaseUntil, id)
+
+return { id, payload, tostring(attempts), token, availableAt, createdAt, lastError }
+`
+
+	// AckScript atomically validates token and removes an in-flight entry.
+	AckScript = `
+local msgKey = KEYS[1]
+local inflight = KEYS[2]
+local delayed = KEYS[3]
+
+local id = ARGV[1]
+local token = ARGV[2]
+
+local currentToken = redis.call('HGET', msgKey, 'token')
+if not currentToken or currentToken == '' then
+	return { '` + scriptErrTokenMissing + `', id }
+end
+if currentToken ~= token then
+	return { '` + scriptErrTokenMismatch + `', id }
+end
+
+local attempts = redis.call('HGET', msgKey, 'attempts') or '0'
+local createdAt = redis.call('HGET', msgKey, 'created_at') or '0'
+
+redis.call('ZREM', inflight, id)
+redis.call('ZREM', delayed, id)
+redis.call('DEL', msgKey)
+
+return { attempts, createdAt }
+`
+
+	// NackScript atomically validates token and applies nack disposition.
+	NackScript = `
+local msgKey = KEYS[1]
+local ready = KEYS[2]
+local delayed = KEYS[3]
+local inflight = KEYS[4]
+local dlq = KEYS[5]
+
+local id = ARGV[1]
+local token = ARGV[2]
+local now = tonumber(ARGV[3])
+local disposition = ARGV[4]
+local delay = tonumber(ARGV[5])
+local reason = ARGV[6]
+
+local currentToken = redis.call('HGET', msgKey, 'token')
+if not currentToken or currentToken == '' then
+	return { '` + scriptErrTokenMissing + `', id }
+end
+if currentToken ~= token then
+	return { '` + scriptErrTokenMismatch + `', id }
+end
+
+local attempts = redis.call('HGET', msgKey, 'attempts') or '0'
+local createdAt = redis.call('HGET', msgKey, 'created_at') or '0'
+
+redis.call('ZREM', inflight, id)
+redis.call('ZREM', delayed, id)
+
+if disposition == 'dead_letter' then
+	redis.call('HSET', msgKey, 'token', '', 'leased_at', '0', 'updated_at', tostring(now), 'last_error', reason, 'dead_lettered_at', tostring(now))
+	redis.call('LPUSH', dlq, id)
+	return { attempts, createdAt, '0' }
+end
+
+if disposition == 'retry' then
+	local availableAt = now + delay
+	redis.call('HSET', msgKey, 'token', '', 'leased_at', '0', 'updated_at', tostring(now), 'last_error', reason, 'available_at', tostring(availableAt))
+	if delay > 0 then
+		redis.call('ZADD', delayed, availableAt, id)
+	else
+		redis.call('LPUSH', ready, id)
+	end
+	return { attempts, createdAt, tostring(availableAt) }
+end
+
+redis.call('DEL', msgKey)
+return { attempts, createdAt, '0' }
+`
+
+	// ExtendLeaseScript atomically validates token and extends the lease.
+	ExtendLeaseScript = `
+local msgKey = KEYS[1]
+local inflight = KEYS[2]
+
+local id = ARGV[1]
+local token = ARGV[2]
+local now = tonumber(ARGV[3])
+local leaseUntil = tonumber(ARGV[4])
+
+local currentToken = redis.call('HGET', msgKey, 'token')
+if not currentToken or currentToken == '' then
+	return { '` + scriptErrTokenMissing + `', id }
+end
+if currentToken ~= token then
+	return { '` + scriptErrTokenMismatch + `', id }
+end
+
+local attempts = redis.call('HGET', msgKey, 'attempts') or '0'
+local createdAt = redis.call('HGET', msgKey, 'created_at') or '0'
+
+redis.call('ZADD', inflight, leaseUntil, id)
+redis.call('HSET', msgKey, 'leased_at', tostring(now), 'updated_at', tostring(now))
+
+return { attempts, createdAt }
+`
 )
 
 // Option configures the redis storage adapter.
@@ -224,65 +384,79 @@ func (s *Storage) Dequeue(ctx context.Context) (*job.ExecutionMessage, queue.Rec
 		return nil, queue.Receipt{}, fmt.Errorf("redis storage not configured")
 	}
 
-	if err := s.releaseDue(ctx); err != nil {
-		return nil, queue.Receipt{}, err
-	}
+	now := s.now().UTC()
+	nowUnix := now.UnixNano()
+	leaseUntil := now.Add(s.visibilityTimeout).UnixNano()
 
-	id, err := s.client.RPop(ctx, s.keys.ready())
+	raw, err := s.client.Eval(ctx, DequeueScript, []string{
+		s.keys.ready(),
+		s.keys.delayed(),
+		s.keys.inflight(),
+		s.keys.messagePrefix(),
+		s.keys.leaseSeq(),
+	}, nowUnix, s.releaseBatchSize, leaseUntil)
 	if err != nil {
 		return nil, queue.Receipt{}, err
 	}
-	if id == "" {
+
+	values, err := parseEvalSlice(raw)
+	if err != nil {
+		return nil, queue.Receipt{}, err
+	}
+	if len(values) == 0 {
 		return nil, queue.Receipt{}, nil
 	}
+	if len(values) < 7 {
+		return nil, queue.Receipt{}, fmt.Errorf("invalid dequeue script response")
+	}
 
-	fields, err := s.client.HGetAll(ctx, s.keys.message(id))
+	id, err := evalString(values[0])
 	if err != nil {
 		return nil, queue.Receipt{}, err
 	}
-	payload := fields[fieldPayload]
-	if payload == "" {
-		return nil, queue.Receipt{}, fmt.Errorf("message payload missing for %q", id)
+	if id == scriptErrMissingPayload {
+		msgID, _ := evalString(values[1])
+		return nil, queue.Receipt{}, fmt.Errorf("message payload missing for %q", msgID)
 	}
 
+	payload, err := evalString(values[1])
+	if err != nil {
+		return nil, queue.Receipt{}, err
+	}
 	msg, err := queue.DecodeExecutionMessage([]byte(payload))
 	if err != nil {
 		return nil, queue.Receipt{}, err
 	}
 
-	attempts := parseInt(fields[fieldAttempts]) + 1
-	token := s.tokenFunc()
-	now := s.now()
-	availableAt := parseInt64(fields[fieldAvailable])
-	createdAt := parseInt64(fields[fieldCreatedAt])
-	lastError := fields[fieldLastError]
-	var availableAtTime time.Time
-	if availableAt > 0 {
-		availableAtTime = time.Unix(0, availableAt).UTC()
+	attempts, err := evalInt(values[2])
+	if err != nil {
+		return nil, queue.Receipt{}, err
 	}
-	var createdAtTime time.Time
-	if createdAt > 0 {
-		createdAtTime = time.Unix(0, createdAt).UTC()
+	token, err := evalString(values[3])
+	if err != nil {
+		return nil, queue.Receipt{}, err
 	}
-
-	if err := s.client.HSet(ctx, s.keys.message(id), map[string]string{
-		fieldAttempts:  strconv.Itoa(attempts),
-		fieldToken:     token,
-		fieldLeasedAt:  strconv.FormatInt(now.UnixNano(), 10),
-		fieldUpdatedAt: strconv.FormatInt(now.UnixNano(), 10),
-	}); err != nil {
+	availableAtUnix, err := evalInt64(values[4])
+	if err != nil {
+		return nil, queue.Receipt{}, err
+	}
+	createdAtUnix, err := evalInt64(values[5])
+	if err != nil {
+		return nil, queue.Receipt{}, err
+	}
+	lastError, err := evalString(values[6])
+	if err != nil {
 		return nil, queue.Receipt{}, err
 	}
 
-	leaseUntil := now.Add(s.visibilityTimeout).UnixNano()
-	if err := s.client.ZAdd(ctx, s.keys.inflight(), float64(leaseUntil), id); err != nil {
-		return nil, queue.Receipt{}, err
-	}
+	availableAt := unixNanoTime(availableAtUnix)
+	createdAt := unixNanoTime(createdAtUnix)
+
 	if err := s.writeStatus(ctx, statusRecord{
 		DispatchID:     id,
 		State:          queue.DispatchStateRunning,
 		Attempt:        attempts,
-		EnqueuedAt:     createdAtTime,
+		EnqueuedAt:     createdAt,
 		UpdatedAt:      now,
 		NextRunAt:      time.Time{},
 		TerminalReason: "",
@@ -295,8 +469,8 @@ func (s *Storage) Dequeue(ctx context.Context) (*job.ExecutionMessage, queue.Rec
 		Token:       token,
 		Attempts:    attempts,
 		LeasedAt:    now,
-		AvailableAt: availableAtTime,
-		CreatedAt:   createdAtTime,
+		AvailableAt: availableAt,
+		CreatedAt:   createdAt,
 		LastError:   lastError,
 	}, nil
 }
@@ -306,19 +480,48 @@ func (s *Storage) Ack(ctx context.Context, receipt queue.Receipt) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis storage not configured")
 	}
-	if receipt.ID == "" {
-		return fmt.Errorf("receipt id required")
+	if receipt.ID == "" || receipt.Token == "" {
+		return fmt.Errorf("receipt id and token required")
 	}
-	if err := s.ensureToken(ctx, receipt); err != nil {
-		return err
-	}
-	fields, err := s.client.HGetAll(ctx, s.keys.message(receipt.ID))
+
+	raw, err := s.client.Eval(ctx, AckScript, []string{
+		s.keys.message(receipt.ID),
+		s.keys.inflight(),
+		s.keys.delayed(),
+	}, receipt.ID, receipt.Token)
 	if err != nil {
 		return err
 	}
+	values, err := parseEvalSlice(raw)
+	if err != nil {
+		return err
+	}
+	if len(values) < 2 {
+		return fmt.Errorf("invalid ack script response")
+	}
+
+	first, err := evalString(values[0])
+	if err != nil {
+		return err
+	}
+	switch first {
+	case scriptErrTokenMissing:
+		return fmt.Errorf("receipt token missing for %q", receipt.ID)
+	case scriptErrTokenMismatch:
+		return fmt.Errorf("receipt token mismatch for %q", receipt.ID)
+	}
+
+	attempts, err := strconv.Atoi(first)
+	if err != nil {
+		return fmt.Errorf("invalid ack attempts value: %w", err)
+	}
+	createdAtUnix, err := evalInt64(values[1])
+	if err != nil {
+		return err
+	}
+
 	now := s.now().UTC()
-	attempts := parseInt(fields[fieldAttempts])
-	enqueuedAt := unixNanoTime(parseInt64(fields[fieldCreatedAt]))
+	enqueuedAt := unixNanoTime(createdAtUnix)
 	if enqueuedAt.IsZero() {
 		enqueuedAt = receipt.CreatedAt.UTC()
 	}
@@ -326,15 +529,6 @@ func (s *Storage) Ack(ctx context.Context, receipt queue.Receipt) error {
 		enqueuedAt = now
 	}
 
-	if err := s.client.ZRem(ctx, s.keys.inflight(), receipt.ID); err != nil {
-		return err
-	}
-	if err := s.client.ZRem(ctx, s.keys.delayed(), receipt.ID); err != nil {
-		return err
-	}
-	if err := s.client.Del(ctx, s.keys.message(receipt.ID)); err != nil {
-		return err
-	}
 	return s.writeStatus(ctx, statusRecord{
 		DispatchID:     receipt.ID,
 		State:          queue.DispatchStateSucceeded,
@@ -351,50 +545,63 @@ func (s *Storage) Nack(ctx context.Context, receipt queue.Receipt, opts queue.Na
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis storage not configured")
 	}
-	if receipt.ID == "" {
-		return fmt.Errorf("receipt id required")
+	if receipt.ID == "" || receipt.Token == "" {
+		return fmt.Errorf("receipt id and token required")
 	}
 	if err := queue.ValidateNackOptions(opts); err != nil {
 		return err
 	}
-	if err := s.ensureToken(ctx, receipt); err != nil {
-		return err
+
+	now := s.now().UTC()
+	reason := strings.TrimSpace(opts.Reason)
+	delay := int64(0)
+	if opts.Delay > 0 {
+		delay = opts.Delay.Nanoseconds()
 	}
-	fields, err := s.client.HGetAll(ctx, s.keys.message(receipt.ID))
+
+	raw, err := s.client.Eval(ctx, NackScript, []string{
+		s.keys.message(receipt.ID),
+		s.keys.ready(),
+		s.keys.delayed(),
+		s.keys.inflight(),
+		s.keys.dlq(),
+	}, receipt.ID, receipt.Token, now.UnixNano(), string(opts.Disposition), delay, reason)
 	if err != nil {
 		return err
 	}
-	attempts := parseInt(fields[fieldAttempts])
-	enqueuedAt := unixNanoTime(parseInt64(fields[fieldCreatedAt]))
-
-	now := s.now().UTC()
-	if err := s.client.ZRem(ctx, s.keys.inflight(), receipt.ID); err != nil {
+	values, err := parseEvalSlice(raw)
+	if err != nil {
 		return err
 	}
+	if len(values) < 3 {
+		return fmt.Errorf("invalid nack script response")
+	}
 
-	update := map[string]string{
-		fieldToken:     "",
-		fieldLeasedAt:  "0",
-		fieldUpdatedAt: strconv.FormatInt(now.UnixNano(), 10),
-	}
-	if opts.Reason != "" {
-		update[fieldLastError] = opts.Reason
-	}
-	if err := s.client.HSet(ctx, s.keys.message(receipt.ID), update); err != nil {
+	first, err := evalString(values[0])
+	if err != nil {
 		return err
 	}
+	switch first {
+	case scriptErrTokenMissing:
+		return fmt.Errorf("receipt token missing for %q", receipt.ID)
+	case scriptErrTokenMismatch:
+		return fmt.Errorf("receipt token mismatch for %q", receipt.ID)
+	}
+	attempts, err := strconv.Atoi(first)
+	if err != nil {
+		return fmt.Errorf("invalid nack attempts value: %w", err)
+	}
+	createdAtUnix, err := evalInt64(values[1])
+	if err != nil {
+		return err
+	}
+	availableAtUnix, err := evalInt64(values[2])
+	if err != nil {
+		return err
+	}
+	enqueuedAt := unixNanoTime(createdAtUnix)
 
 	if opts.Disposition == queue.NackDispositionDeadLetter {
-		nowUnix := now.UnixNano()
-		if err := s.client.HSet(ctx, s.keys.message(receipt.ID), map[string]string{
-			fieldDeadAt:    strconv.FormatInt(nowUnix, 10),
-			fieldUpdatedAt: strconv.FormatInt(nowUnix, 10),
-		}); err != nil {
-			return err
-		}
-		if err := s.client.LPush(ctx, s.keys.dlq(), receipt.ID); err != nil {
-			return err
-		}
 		return s.writeStatus(ctx, statusRecord{
 			DispatchID:     receipt.ID,
 			State:          queue.DispatchStateDeadLetter,
@@ -402,53 +609,29 @@ func (s *Storage) Nack(ctx context.Context, receipt queue.Receipt, opts queue.Na
 			EnqueuedAt:     enqueuedAt,
 			UpdatedAt:      now,
 			NextRunAt:      time.Time{},
-			TerminalReason: strings.TrimSpace(opts.Reason),
+			TerminalReason: reason,
 		})
 	}
 
 	if opts.Disposition == queue.NackDispositionRetry {
-		availableAt := now
+		availableAt := unixNanoTime(availableAtUnix)
+		state := queue.DispatchStateAccepted
+		nextRunAt := time.Time{}
 		if opts.Delay > 0 {
-			availableAt = now.Add(opts.Delay)
-			score := float64(availableAt.UnixNano())
-			update[fieldAvailable] = strconv.FormatInt(availableAt.UnixNano(), 10)
-			if err := s.client.HSet(ctx, s.keys.message(receipt.ID), update); err != nil {
-				return err
-			}
-			if err := s.client.ZAdd(ctx, s.keys.delayed(), score, receipt.ID); err != nil {
-				return err
-			}
-			return s.writeStatus(ctx, statusRecord{
-				DispatchID:     receipt.ID,
-				State:          queue.DispatchStateRetrying,
-				Attempt:        attempts,
-				EnqueuedAt:     enqueuedAt,
-				UpdatedAt:      now,
-				NextRunAt:      availableAt,
-				TerminalReason: strings.TrimSpace(opts.Reason),
-			})
-		}
-		update[fieldAvailable] = strconv.FormatInt(availableAt.UnixNano(), 10)
-		if err := s.client.HSet(ctx, s.keys.message(receipt.ID), update); err != nil {
-			return err
-		}
-		if err := s.client.LPush(ctx, s.keys.ready(), receipt.ID); err != nil {
-			return err
+			state = queue.DispatchStateRetrying
+			nextRunAt = availableAt
 		}
 		return s.writeStatus(ctx, statusRecord{
 			DispatchID:     receipt.ID,
-			State:          queue.DispatchStateAccepted,
+			State:          state,
 			Attempt:        attempts,
 			EnqueuedAt:     enqueuedAt,
 			UpdatedAt:      now,
-			NextRunAt:      time.Time{},
-			TerminalReason: strings.TrimSpace(opts.Reason),
+			NextRunAt:      nextRunAt,
+			TerminalReason: reason,
 		})
 	}
 
-	if err := s.client.Del(ctx, s.keys.message(receipt.ID)); err != nil {
-		return err
-	}
 	state := queue.DispatchStateFailed
 	if opts.Disposition == queue.NackDispositionCanceled {
 		state = queue.DispatchStateCanceled
@@ -460,7 +643,7 @@ func (s *Storage) Nack(ctx context.Context, receipt queue.Receipt, opts queue.Na
 		EnqueuedAt:     enqueuedAt,
 		UpdatedAt:      now,
 		NextRunAt:      time.Time{},
-		TerminalReason: strings.TrimSpace(opts.Reason),
+		TerminalReason: reason,
 	})
 }
 
@@ -497,32 +680,50 @@ func (s *Storage) ExtendLease(ctx context.Context, receipt queue.Receipt, ttl ti
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis storage not configured")
 	}
-	if receipt.ID == "" {
-		return fmt.Errorf("receipt id required")
-	}
-	if err := s.ensureToken(ctx, receipt); err != nil {
-		return err
-	}
-	fields, err := s.client.HGetAll(ctx, s.keys.message(receipt.ID))
-	if err != nil {
-		return err
+	if receipt.ID == "" || receipt.Token == "" {
+		return fmt.Errorf("receipt id and token required")
 	}
 	if ttl <= 0 {
 		ttl = s.visibilityTimeout
 	}
 	now := s.now().UTC()
 	until := now.Add(ttl).UnixNano()
-	if err := s.client.ZAdd(ctx, s.keys.inflight(), float64(until), receipt.ID); err != nil {
+
+	raw, err := s.client.Eval(ctx, ExtendLeaseScript, []string{
+		s.keys.message(receipt.ID),
+		s.keys.inflight(),
+	}, receipt.ID, receipt.Token, now.UnixNano(), until)
+	if err != nil {
 		return err
 	}
-	if err := s.client.HSet(ctx, s.keys.message(receipt.ID), map[string]string{
-		fieldLeasedAt:  strconv.FormatInt(now.UnixNano(), 10),
-		fieldUpdatedAt: strconv.FormatInt(now.UnixNano(), 10),
-	}); err != nil {
+	values, err := parseEvalSlice(raw)
+	if err != nil {
+		return err
+	}
+	if len(values) < 2 {
+		return fmt.Errorf("invalid lease extension script response")
+	}
+
+	first, err := evalString(values[0])
+	if err != nil {
+		return err
+	}
+	switch first {
+	case scriptErrTokenMissing:
+		return fmt.Errorf("receipt token missing for %q", receipt.ID)
+	case scriptErrTokenMismatch:
+		return fmt.Errorf("receipt token mismatch for %q", receipt.ID)
+	}
+	attempts, err := strconv.Atoi(first)
+	if err != nil {
+		return fmt.Errorf("invalid lease extension attempts value: %w", err)
+	}
+	createdAtUnix, err := evalInt64(values[1])
+	if err != nil {
 		return err
 	}
 
-	enqueuedAt := unixNanoTime(parseInt64(fields[fieldCreatedAt]))
+	enqueuedAt := unixNanoTime(createdAtUnix)
 	if enqueuedAt.IsZero() {
 		enqueuedAt = receipt.CreatedAt.UTC()
 	}
@@ -532,7 +733,7 @@ func (s *Storage) ExtendLease(ctx context.Context, receipt queue.Receipt, ttl ti
 	return s.writeStatus(ctx, statusRecord{
 		DispatchID:     receipt.ID,
 		State:          queue.DispatchStateRunning,
-		Attempt:        parseInt(fields[fieldAttempts]),
+		Attempt:        attempts,
 		EnqueuedAt:     enqueuedAt,
 		UpdatedAt:      now,
 		NextRunAt:      time.Time{},
@@ -654,6 +855,78 @@ func (s *Storage) writeStatus(ctx context.Context, record statusRecord) error {
 		return s.client.Expire(ctx, s.keys.status(dispatchID), s.statusTTL)
 	}
 	return nil
+}
+
+func parseEvalSlice(raw any) ([]any, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	switch values := raw.(type) {
+	case []any:
+		return values, nil
+	default:
+		return nil, fmt.Errorf("unexpected redis eval response type %T", raw)
+	}
+}
+
+func evalString(raw any) (string, error) {
+	switch value := raw.(type) {
+	case nil:
+		return "", nil
+	case string:
+		return value, nil
+	case []byte:
+		return string(value), nil
+	case fmt.Stringer:
+		return value.String(), nil
+	default:
+		return fmt.Sprint(value), nil
+	}
+}
+
+func evalInt(raw any) (int, error) {
+	value, err := evalInt64(raw)
+	if err != nil {
+		return 0, err
+	}
+	return int(value), nil
+}
+
+func evalInt64(raw any) (int64, error) {
+	switch value := raw.(type) {
+	case nil:
+		return 0, nil
+	case int64:
+		return value, nil
+	case int:
+		return int64(value), nil
+	case uint64:
+		return int64(value), nil
+	case uint:
+		return int64(value), nil
+	case float64:
+		return int64(value), nil
+	case string:
+		if value == "" {
+			return 0, nil
+		}
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return 0, err
+		}
+		return parsed, nil
+	case []byte:
+		if len(value) == 0 {
+			return 0, nil
+		}
+		parsed, err := strconv.ParseInt(string(value), 10, 64)
+		if err != nil {
+			return 0, err
+		}
+		return parsed, nil
+	default:
+		return 0, fmt.Errorf("unsupported numeric redis value type %T", raw)
+	}
 }
 
 func parseInt(value string) int {
