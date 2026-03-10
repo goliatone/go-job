@@ -166,6 +166,9 @@ func (s *Storage) Migrate(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("postgres storage not configured")
 	}
+	if err := s.validateIdentifiers(); err != nil {
+		return err
+	}
 	for _, stmt := range schemaStatements(s.table, s.dlqTable, s.statusTable) {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return err
@@ -178,6 +181,9 @@ func (s *Storage) Migrate(ctx context.Context) error {
 func (s *Storage) Cleanup(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("postgres storage not configured")
+	}
+	if err := s.validateIdentifiers(); err != nil {
+		return err
 	}
 	for _, stmt := range dropStatements(s.table, s.dlqTable, s.statusTable) {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
@@ -196,6 +202,9 @@ func (s *Storage) Enqueue(ctx context.Context, msg *job.ExecutionMessage) (queue
 func (s *Storage) EnqueueAt(ctx context.Context, msg *job.ExecutionMessage, at time.Time) (queue.EnqueueReceipt, error) {
 	if s == nil || s.db == nil {
 		return queue.EnqueueReceipt{}, fmt.Errorf("postgres storage not configured")
+	}
+	if err := s.validateIdentifiers(); err != nil {
+		return queue.EnqueueReceipt{}, err
 	}
 	if err := queue.ValidateRequiredMessage(msg); err != nil {
 		return queue.EnqueueReceipt{}, err
@@ -257,6 +266,9 @@ func (s *Storage) Dequeue(ctx context.Context) (*job.ExecutionMessage, queue.Rec
 	if s == nil || s.db == nil {
 		return nil, queue.Receipt{}, fmt.Errorf("postgres storage not configured")
 	}
+	if err := s.validateIdentifiers(); err != nil {
+		return nil, queue.Receipt{}, err
+	}
 
 	if s.useSkipLocked {
 		return s.dequeueSkipLocked(ctx)
@@ -268,6 +280,9 @@ func (s *Storage) Dequeue(ctx context.Context) (*job.ExecutionMessage, queue.Rec
 func (s *Storage) Ack(ctx context.Context, receipt queue.Receipt) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("postgres storage not configured")
+	}
+	if err := s.validateIdentifiers(); err != nil {
+		return err
 	}
 	if receipt.ID == "" || receipt.Token == "" {
 		return fmt.Errorf("receipt id and token required")
@@ -314,6 +329,9 @@ func (s *Storage) Ack(ctx context.Context, receipt queue.Receipt) error {
 func (s *Storage) Nack(ctx context.Context, receipt queue.Receipt, opts queue.NackOptions) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("postgres storage not configured")
+	}
+	if err := s.validateIdentifiers(); err != nil {
+		return err
 	}
 	if receipt.ID == "" || receipt.Token == "" {
 		return fmt.Errorf("receipt id and token required")
@@ -411,6 +429,9 @@ func (s *Storage) ExtendLease(ctx context.Context, receipt queue.Receipt, ttl ti
 	if s == nil || s.db == nil {
 		return fmt.Errorf("postgres storage not configured")
 	}
+	if err := s.validateIdentifiers(); err != nil {
+		return err
+	}
 	if receipt.ID == "" || receipt.Token == "" {
 		return fmt.Errorf("receipt id and token required")
 	}
@@ -454,6 +475,9 @@ func (s *Storage) GetDispatchStatus(ctx context.Context, dispatchID string) (que
 	}
 	if s == nil || s.db == nil {
 		return status, fmt.Errorf("postgres storage not configured")
+	}
+	if err := s.validateIdentifiers(); err != nil {
+		return status, err
 	}
 	if status.DispatchID == "" {
 		return status, queue.ErrDispatchNotFound
@@ -796,4 +820,49 @@ func ptrTime(value time.Time) *time.Time {
 	}
 	v := value.UTC()
 	return &v
+}
+
+func (s *Storage) validateIdentifiers() error {
+	if err := validateSQLIdentifier("queue table", s.table); err != nil {
+		return err
+	}
+	if err := validateSQLIdentifier("queue dlq table", s.dlqTable); err != nil {
+		return err
+	}
+	return validateSQLIdentifier("queue status table", s.statusTable)
+}
+
+func validateSQLIdentifier(label, value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("%s identifier required", label)
+	}
+	parts := strings.Split(value, ".")
+	for _, part := range parts {
+		if !isSQLIdentifierPart(part) {
+			return fmt.Errorf("invalid %s identifier %q", label, value)
+		}
+	}
+	return nil
+}
+
+func isSQLIdentifierPart(part string) bool {
+	if part == "" {
+		return false
+	}
+	for idx := 0; idx < len(part); idx++ {
+		ch := part[idx]
+		isLetter := (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+		isDigit := ch >= '0' && ch <= '9'
+		if idx == 0 {
+			if !isLetter && ch != '_' {
+				return false
+			}
+			continue
+		}
+		if !isLetter && !isDigit && ch != '_' {
+			return false
+		}
+	}
+	return true
 }
