@@ -12,6 +12,7 @@ created_at BIGINT NOT NULL,
 updated_at BIGINT NOT NULL
 )`, table),
 		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS %s_requested_at_idx ON %s (requested_at)`, table, table),
+		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS %s_updated_at_idx ON %s (updated_at)`, table, table),
 	}
 }
 
