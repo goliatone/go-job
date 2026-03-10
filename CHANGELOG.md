@@ -1,5 +1,20 @@
 # Changelog
 
+# [0.19.0](https://github.com/goliatone/go-job/compare/v0.18.0...v0.19.0) - (2026-03-10)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.19.0 ([a68a115](https://github.com/goliatone/go-job/commit/a68a115161ceb854e037bf37185464676817b978))  - (goliatone)
+
+## <!-- 2 -->🚜 Refactor
+
+- Clean code ([e6f9410](https://github.com/goliatone/go-job/commit/e6f94109ca041b7af0cf920a5bb8c4dca2d87d70))  - (goliatone)
+- Centralize helpers in package ([5919d68](https://github.com/goliatone/go-job/commit/5919d685f0699a999bc392553ed88e8b2886191b))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.18.0 ([55e4a1a](https://github.com/goliatone/go-job/commit/55e4a1a1bac00de32922dde88cc914fca3a8b6ef))  - (goliatone)
+
 # [0.18.0](https://github.com/goliatone/go-job/compare/v0.17.0...v0.18.0) - (2026-03-10)
 
 ## <!-- 1 -->🐛 Bug Fixes
