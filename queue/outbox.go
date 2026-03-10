@@ -167,9 +167,9 @@ func (a *StorageOutboxAdapter) MarkFailed(ctx context.Context, id, leaseToken st
 		ID:    id,
 		Token: leaseToken,
 	}, NackOptions{
-		Delay:   delay,
-		Requeue: true,
-		Reason:  strings.TrimSpace(reason),
+		Disposition: NackDispositionRetry,
+		Delay:       delay,
+		Reason:      strings.TrimSpace(reason),
 	})
 }
 
