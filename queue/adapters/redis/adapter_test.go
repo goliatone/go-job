@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"sync"
 	"testing"
@@ -31,7 +32,7 @@ func TestStorageEnqueueDequeueAck(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, out)
 	assert.Equal(t, "export", out.JobID)
-	assert.Equal(t, "token-1", receipt.Token)
+	assert.NotEmpty(t, receipt.Token)
 	assert.Equal(t, 1, receipt.Attempts)
 
 	require.NoError(t, storage.Ack(context.Background(), receipt))
@@ -242,6 +243,7 @@ func TestStorageNackDelayedRetry(t *testing.T) {
 	_, receipt, err := storage.Dequeue(context.Background())
 	require.NoError(t, err)
 	require.False(t, receipt.CreatedAt.IsZero())
+	firstToken := receipt.Token
 
 	require.NoError(t, storage.Nack(context.Background(), receipt, queue.NackOptions{
 		Disposition: queue.NackDispositionRetry,
@@ -258,7 +260,8 @@ func TestStorageNackDelayedRetry(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, out)
 	assert.Equal(t, 2, receipt.Attempts)
-	assert.Equal(t, "token-2", receipt.Token)
+	assert.NotEmpty(t, receipt.Token)
+	assert.NotEqual(t, firstToken, receipt.Token)
 	assert.Equal(t, "retry", receipt.LastError)
 	assert.Equal(t, clock.Now(), receipt.AvailableAt)
 }
@@ -279,14 +282,16 @@ func TestStorageVisibilityTimeoutRequeues(t *testing.T) {
 
 	_, receipt, err := storage.Dequeue(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, "token-1", receipt.Token)
+	firstToken := receipt.Token
+	assert.NotEmpty(t, firstToken)
 
 	clock.Advance(3 * time.Second)
 	out, receipt, err := storage.Dequeue(context.Background())
 	require.NoError(t, err)
 	require.NotNil(t, out)
 	assert.Equal(t, 2, receipt.Attempts)
-	assert.Equal(t, "token-2", receipt.Token)
+	assert.NotEmpty(t, receipt.Token)
+	assert.NotEqual(t, firstToken, receipt.Token)
 }
 
 func TestStorageDeadLetters(t *testing.T) {
@@ -357,6 +362,8 @@ func TestStorageExtendLease(t *testing.T) {
 
 	_, receipt, err := storage.Dequeue(context.Background())
 	require.NoError(t, err)
+	firstToken := receipt.Token
+	assert.NotEmpty(t, firstToken)
 	require.NoError(t, storage.ExtendLease(context.Background(), receipt, 10*time.Second))
 
 	clock.Advance(3 * time.Second)
@@ -369,7 +376,8 @@ func TestStorageExtendLease(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, out)
 	assert.Equal(t, 2, next.Attempts)
-	assert.Equal(t, "token-2", next.Token)
+	assert.NotEmpty(t, next.Token)
+	assert.NotEqual(t, firstToken, next.Token)
 }
 
 type manualClock struct {
@@ -518,6 +526,24 @@ func (c *fakeClient) ZRangeByScore(_ context.Context, key string, max float64, l
 	return items, nil
 }
 
+func (c *fakeClient) Eval(_ context.Context, script string, keys []string, args ...any) (any, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	switch script {
+	case DequeueScript:
+		return c.evalDequeue(keys, args...)
+	case AckScript:
+		return c.evalAck(keys, args...)
+	case NackScript:
+		return c.evalNack(keys, args...)
+	case ExtendLeaseScript:
+		return c.evalExtendLease(keys, args...)
+	default:
+		return nil, fmt.Errorf("unsupported script")
+	}
+}
+
 func (c *fakeClient) Del(_ context.Context, keys ...string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -531,6 +557,278 @@ func (c *fakeClient) Del(_ context.Context, keys ...string) error {
 
 func (c *fakeClient) Expire(_ context.Context, _ string, _ time.Duration) error {
 	return nil
+}
+
+func (c *fakeClient) evalDequeue(keys []string, args ...any) (any, error) {
+	if len(keys) != 5 || len(args) < 3 {
+		return nil, fmt.Errorf("invalid dequeue eval arguments")
+	}
+	now, err := evalArgInt64(args[0])
+	if err != nil {
+		return nil, err
+	}
+	batch, err := evalArgInt64(args[1])
+	if err != nil {
+		return nil, err
+	}
+	leaseUntil, err := evalArgInt64(args[2])
+	if err != nil {
+		return nil, err
+	}
+
+	for _, id := range c.zrangeByScoreNoLock(keys[1], float64(now), batch) {
+		c.zremNoLock(keys[1], id)
+		c.lpushNoLock(keys[0], id)
+	}
+	for _, id := range c.zrangeByScoreNoLock(keys[2], float64(now), batch) {
+		c.zremNoLock(keys[2], id)
+		msgKey := keys[3] + id
+		c.hsetNoLock(msgKey, map[string]string{
+			fieldToken:     "",
+			fieldLeasedAt:  "0",
+			fieldUpdatedAt: strconv.FormatInt(now, 10),
+		})
+		c.lpushNoLock(keys[0], id)
+	}
+
+	id := c.rpopNoLock(keys[0])
+	if id == "" {
+		return []any{}, nil
+	}
+	msgKey := keys[3] + id
+	payload := c.hashes[msgKey][fieldPayload]
+	if payload == "" {
+		return []any{scriptErrMissingPayload, id}, nil
+	}
+	token := c.nextLeaseTokenNoLock(keys[4], now, id)
+	attempts := parseInt(c.hashes[msgKey][fieldAttempts]) + 1
+	c.hsetNoLock(msgKey, map[string]string{
+		fieldAttempts:  strconv.Itoa(attempts),
+		fieldToken:     token,
+		fieldLeasedAt:  strconv.FormatInt(now, 10),
+		fieldUpdatedAt: strconv.FormatInt(now, 10),
+	})
+	c.zaddNoLock(keys[2], float64(leaseUntil), id)
+	return []any{
+		id,
+		payload,
+		strconv.Itoa(attempts),
+		token,
+		c.hashes[msgKey][fieldAvailable],
+		c.hashes[msgKey][fieldCreatedAt],
+		c.hashes[msgKey][fieldLastError],
+	}, nil
+}
+
+func (c *fakeClient) evalAck(keys []string, args ...any) (any, error) {
+	if len(keys) != 3 || len(args) < 2 {
+		return nil, fmt.Errorf("invalid ack eval arguments")
+	}
+	id := fmt.Sprint(args[0])
+	token := fmt.Sprint(args[1])
+	msgKey := keys[0]
+	current := c.hashes[msgKey][fieldToken]
+	if current == "" {
+		return []any{scriptErrTokenMissing, id}, nil
+	}
+	if current != token {
+		return []any{scriptErrTokenMismatch, id}, nil
+	}
+
+	attempts := c.hashes[msgKey][fieldAttempts]
+	createdAt := c.hashes[msgKey][fieldCreatedAt]
+	c.zremNoLock(keys[1], id)
+	c.zremNoLock(keys[2], id)
+	delete(c.hashes, msgKey)
+	return []any{attempts, createdAt}, nil
+}
+
+func (c *fakeClient) evalNack(keys []string, args ...any) (any, error) {
+	if len(keys) != 5 || len(args) < 6 {
+		return nil, fmt.Errorf("invalid nack eval arguments")
+	}
+	id := fmt.Sprint(args[0])
+	token := fmt.Sprint(args[1])
+	now, err := evalArgInt64(args[2])
+	if err != nil {
+		return nil, err
+	}
+	disposition := fmt.Sprint(args[3])
+	delay, err := evalArgInt64(args[4])
+	if err != nil {
+		return nil, err
+	}
+	reason := fmt.Sprint(args[5])
+
+	msgKey := keys[0]
+	current := c.hashes[msgKey][fieldToken]
+	if current == "" {
+		return []any{scriptErrTokenMissing, id}, nil
+	}
+	if current != token {
+		return []any{scriptErrTokenMismatch, id}, nil
+	}
+	attempts := c.hashes[msgKey][fieldAttempts]
+	createdAt := c.hashes[msgKey][fieldCreatedAt]
+
+	c.zremNoLock(keys[3], id)
+	c.zremNoLock(keys[2], id)
+
+	switch disposition {
+	case string(queue.NackDispositionDeadLetter):
+		c.hsetNoLock(msgKey, map[string]string{
+			fieldToken:     "",
+			fieldLeasedAt:  "0",
+			fieldUpdatedAt: strconv.FormatInt(now, 10),
+			fieldLastError: reason,
+			fieldDeadAt:    strconv.FormatInt(now, 10),
+		})
+		c.lpushNoLock(keys[4], id)
+		return []any{attempts, createdAt, "0"}, nil
+	case string(queue.NackDispositionRetry):
+		availableAt := now + delay
+		c.hsetNoLock(msgKey, map[string]string{
+			fieldToken:     "",
+			fieldLeasedAt:  "0",
+			fieldUpdatedAt: strconv.FormatInt(now, 10),
+			fieldLastError: reason,
+			fieldAvailable: strconv.FormatInt(availableAt, 10),
+		})
+		if delay > 0 {
+			c.zaddNoLock(keys[2], float64(availableAt), id)
+		} else {
+			c.lpushNoLock(keys[1], id)
+		}
+		return []any{attempts, createdAt, strconv.FormatInt(availableAt, 10)}, nil
+	default:
+		delete(c.hashes, msgKey)
+		return []any{attempts, createdAt, "0"}, nil
+	}
+}
+
+func (c *fakeClient) evalExtendLease(keys []string, args ...any) (any, error) {
+	if len(keys) != 2 || len(args) < 4 {
+		return nil, fmt.Errorf("invalid extend lease eval arguments")
+	}
+	id := fmt.Sprint(args[0])
+	token := fmt.Sprint(args[1])
+	now, err := evalArgInt64(args[2])
+	if err != nil {
+		return nil, err
+	}
+	leaseUntil, err := evalArgInt64(args[3])
+	if err != nil {
+		return nil, err
+	}
+
+	msgKey := keys[0]
+	current := c.hashes[msgKey][fieldToken]
+	if current == "" {
+		return []any{scriptErrTokenMissing, id}, nil
+	}
+	if current != token {
+		return []any{scriptErrTokenMismatch, id}, nil
+	}
+	attempts := c.hashes[msgKey][fieldAttempts]
+	createdAt := c.hashes[msgKey][fieldCreatedAt]
+
+	c.hsetNoLock(msgKey, map[string]string{
+		fieldLeasedAt:  strconv.FormatInt(now, 10),
+		fieldUpdatedAt: strconv.FormatInt(now, 10),
+	})
+	c.zaddNoLock(keys[1], float64(leaseUntil), id)
+	return []any{attempts, createdAt}, nil
+}
+
+func (c *fakeClient) hsetNoLock(key string, values map[string]string) {
+	if _, ok := c.hashes[key]; !ok {
+		c.hashes[key] = make(map[string]string)
+	}
+	for field, value := range values {
+		c.hashes[key][field] = value
+	}
+}
+
+func (c *fakeClient) lpushNoLock(key string, values ...string) {
+	list := c.lists[key]
+	for _, value := range values {
+		list = append([]string{value}, list...)
+	}
+	c.lists[key] = list
+}
+
+func (c *fakeClient) rpopNoLock(key string) string {
+	list := c.lists[key]
+	if len(list) == 0 {
+		return ""
+	}
+	value := list[len(list)-1]
+	c.lists[key] = list[:len(list)-1]
+	return value
+}
+
+func (c *fakeClient) zaddNoLock(key string, score float64, member string) {
+	if _, ok := c.zsets[key]; !ok {
+		c.zsets[key] = make(map[string]float64)
+	}
+	c.zsets[key][member] = score
+}
+
+func (c *fakeClient) zremNoLock(key string, members ...string) {
+	for _, member := range members {
+		delete(c.zsets[key], member)
+	}
+	if len(c.zsets[key]) == 0 {
+		delete(c.zsets, key)
+	}
+}
+
+func (c *fakeClient) zrangeByScoreNoLock(key string, max float64, limit int64) []string {
+	var items []ZItem
+	for member, score := range c.zsets[key] {
+		if score <= max {
+			items = append(items, ZItem{Member: member, Score: score})
+		}
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	sortZItems(items)
+	if limit > 0 && int64(len(items)) > limit {
+		items = items[:limit]
+	}
+	out := make([]string, len(items))
+	for idx := range items {
+		out[idx] = items[idx].Member
+	}
+	return out
+}
+
+func (c *fakeClient) nextLeaseTokenNoLock(counterKey string, now int64, id string) string {
+	key := "__lease_counter__:" + counterKey
+	seq := parseInt(c.hashes[key]["seq"]) + 1
+	c.hsetNoLock(key, map[string]string{
+		"seq": strconv.Itoa(seq),
+	})
+	return fmt.Sprintf("%s:%d:%d", id, now, seq)
+}
+
+func evalArgInt64(raw any) (int64, error) {
+	switch value := raw.(type) {
+	case int64:
+		return value, nil
+	case int:
+		return int64(value), nil
+	case float64:
+		return int64(value), nil
+	case string:
+		if value == "" {
+			return 0, nil
+		}
+		return strconv.ParseInt(value, 10, 64)
+	default:
+		return 0, fmt.Errorf("unsupported argument type %T", raw)
+	}
 }
 
 func (c *fakeClient) HasKey(key string) bool {

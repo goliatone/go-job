@@ -307,6 +307,20 @@ func TestStorageExtendLease(t *testing.T) {
 	assert.Equal(t, "token-2", next.Token)
 }
 
+func TestStorageRejectsInvalidTableIdentifiers(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	require.NoError(t, err)
+	defer db.Close()
+
+	storage := NewStorage(db,
+		WithDialect(DialectSQLite),
+		WithTableName("queue_messages;DROP TABLE queue_messages"),
+	)
+	_, err = storage.Enqueue(context.Background(), &job.ExecutionMessage{JobID: "export"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid queue table identifier")
+}
+
 type testStorage struct {
 	*Storage
 	clock *manualClock

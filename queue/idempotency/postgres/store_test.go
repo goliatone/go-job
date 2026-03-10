@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -65,14 +66,61 @@ func TestStoreExpiresRecords(t *testing.T) {
 	assert.True(t, acquired)
 }
 
+func TestStoreAcquireConcurrentSameKey(t *testing.T) {
+	store, cleanup := setupStore(t)
+	defer cleanup()
+
+	const workers = 12
+	var acquiredCount atomic.Int64
+	errCh := make(chan error, workers)
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			_, acquired, err := store.Acquire(context.Background(), "same-key", 30*time.Second)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if acquired {
+				acquiredCount.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		require.NoError(t, err)
+	}
+	assert.Equal(t, int64(1), acquiredCount.Load())
+}
+
+func TestStoreRejectsInvalidTableIdentifier(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	require.NoError(t, err)
+	defer db.Close()
+
+	store := NewStore(db,
+		WithDialect(DialectSQLite),
+		WithTableName("idempotency_records;DROP TABLE idempotency_records"),
+	)
+	_, _, err = store.Acquire(context.Background(), "key-1", 10*time.Second)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid idempotency table identifier")
+}
+
 type testStore struct {
 	*Store
 	clock *manualClock
 }
 
 func setupStore(t *testing.T) (*testStore, func()) {
-	db, err := sql.Open("sqlite3", ":memory:")
+	db, err := sql.Open("sqlite3", "file:idempotency_store_test?mode=memory&cache=shared")
 	require.NoError(t, err)
+	db.SetMaxOpenConns(1)
 
 	clock := newManualClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 

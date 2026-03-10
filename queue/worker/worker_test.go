@@ -73,6 +73,47 @@ func TestWorkerAcksOnSuccess(t *testing.T) {
 	assert.Equal(t, int32(1), atomic.LoadInt32(&successes))
 }
 
+func TestWorkerDoesNotReportSuccessWhenAckFails(t *testing.T) {
+	dequeuer := &fakeDequeuer{deliveries: make(chan queue.Delivery, 1)}
+	delivery := &fakeDelivery{
+		msg:      &job.ExecutionMessage{JobID: "job", ScriptPath: "/tmp/job"},
+		attempts: 1,
+		ackErr:   assert.AnError,
+	}
+	dequeuer.deliveries <- delivery
+
+	var successes int32
+	var failures int32
+	failedCh := make(chan struct{}, 1)
+	hook := HookFuncs{
+		OnSuccessFunc: func(context.Context, Event) {
+			atomic.AddInt32(&successes, 1)
+		},
+		OnFailureFunc: func(context.Context, Event) {
+			atomic.AddInt32(&failures, 1)
+			select {
+			case failedCh <- struct{}{}:
+			default:
+			}
+		},
+	}
+
+	worker := NewWorker(dequeuer, WithConcurrency(1), WithIdleDelay(0), WithHooks(hook))
+	require.NoError(t, worker.Register(&testTask{id: "job", path: "/tmp/job"}))
+	require.NoError(t, worker.Start(context.Background()))
+
+	select {
+	case <-failedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for failure hook")
+	}
+
+	require.NoError(t, worker.Stop(context.Background()))
+	assert.Equal(t, int32(1), atomic.LoadInt32(&delivery.acked))
+	assert.Equal(t, int32(0), atomic.LoadInt32(&successes))
+	assert.Equal(t, int32(1), atomic.LoadInt32(&failures))
+}
+
 func TestWorkerNacksWithRetry(t *testing.T) {
 	dequeuer := &fakeDequeuer{deliveries: make(chan queue.Delivery, 1)}
 	nackCh := make(chan queue.NackOptions, 1)
@@ -490,6 +531,7 @@ type fakeDelivery struct {
 	acked    int32
 	nacked   int32
 	extended int32
+	ackErr   error
 	ackCh    chan struct{}
 	nackCh   chan queue.NackOptions
 }
@@ -506,7 +548,7 @@ func (d *fakeDelivery) Ack(context.Context) error {
 		default:
 		}
 	}
-	return nil
+	return d.ackErr
 }
 
 func (d *fakeDelivery) Nack(_ context.Context, opts queue.NackOptions) error {

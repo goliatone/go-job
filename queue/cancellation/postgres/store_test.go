@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -50,12 +51,61 @@ func TestStoreSubscribe(t *testing.T) {
 	}
 }
 
+func TestStoreSubscribeHandlesBatchWithSameTimestamps(t *testing.T) {
+	store, cleanup := setupStoreWithBatch(t, 2)
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sub, err := store.Subscribe(ctx)
+	require.NoError(t, err)
+
+	for idx := 1; idx <= 5; idx++ {
+		key := fmt.Sprintf("export-%d", idx)
+		require.NoError(t, store.Request(context.Background(), cancellation.Request{
+			Key:         key,
+			Reason:      "batch",
+			RequestedAt: store.clock.Now(),
+		}))
+	}
+
+	received := make(map[string]struct{})
+	deadline := time.After(1500 * time.Millisecond)
+	for len(received) < 5 {
+		select {
+		case req := <-sub:
+			received[req.Key] = struct{}{}
+		case <-deadline:
+			t.Fatalf("timed out waiting for subscription batch pagination, received=%d", len(received))
+		}
+	}
+}
+
+func TestStoreRejectsInvalidTableIdentifier(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	require.NoError(t, err)
+	defer db.Close()
+
+	store := NewStore(db,
+		WithDialect(DialectSQLite),
+		WithTableName("queue_cancellations;DROP TABLE queue_cancellations"),
+	)
+	err = store.Request(context.Background(), cancellation.Request{Key: "export-1"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid cancellation table identifier")
+}
+
 type testStore struct {
 	*Store
 	clock *manualClock
 }
 
 func setupStore(t *testing.T) (*testStore, func()) {
+	return setupStoreWithBatch(t, 50)
+}
+
+func setupStoreWithBatch(t *testing.T, batch int) (*testStore, func()) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	require.NoError(t, err)
 
@@ -65,7 +115,7 @@ func setupStore(t *testing.T) (*testStore, func()) {
 		WithDialect(DialectSQLite),
 		WithClock(clock.Now),
 		WithPollInterval(5*time.Millisecond),
-		WithBatchSize(50),
+		WithBatchSize(batch),
 	)
 	require.NoError(t, store.Migrate(context.Background()))
 
