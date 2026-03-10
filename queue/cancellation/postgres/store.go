@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/goliatone/go-job/queue/cancellation"
@@ -103,6 +104,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("postgres cancellation store not configured")
 	}
+	if err := s.validateIdentifier(); err != nil {
+		return err
+	}
 	for _, stmt := range schemaStatements(s.table) {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return err
@@ -116,6 +120,9 @@ func (s *Store) Cleanup(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("postgres cancellation store not configured")
 	}
+	if err := s.validateIdentifier(); err != nil {
+		return err
+	}
 	for _, stmt := range dropStatements(s.table) {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return err
@@ -128,6 +135,9 @@ func (s *Store) Cleanup(ctx context.Context) error {
 func (s *Store) Request(ctx context.Context, req cancellation.Request) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("postgres cancellation store not configured")
+	}
+	if err := s.validateIdentifier(); err != nil {
+		return err
 	}
 	if req.Key == "" {
 		return fmt.Errorf("cancellation key required")
@@ -149,6 +159,9 @@ ON CONFLICT (key) DO UPDATE SET reason = excluded.reason, requested_at = exclude
 func (s *Store) Get(ctx context.Context, key string) (cancellation.Request, bool, error) {
 	if s == nil || s.db == nil {
 		return cancellation.Request{}, false, fmt.Errorf("postgres cancellation store not configured")
+	}
+	if err := s.validateIdentifier(); err != nil {
+		return cancellation.Request{}, false, err
 	}
 	if key == "" {
 		return cancellation.Request{}, false, fmt.Errorf("cancellation key required")
@@ -177,6 +190,9 @@ func (s *Store) Subscribe(ctx context.Context) (<-chan cancellation.Request, err
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("postgres cancellation store not configured")
 	}
+	if err := s.validateIdentifier(); err != nil {
+		return nil, err
+	}
 	out := make(chan cancellation.Request, 1)
 	go s.poll(ctx, out)
 	return out, nil
@@ -192,29 +208,23 @@ func (s *Store) poll(ctx context.Context, out chan<- cancellation.Request) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	lastSeen := time.Unix(0, 0).UTC()
-	seen := make(map[string]int64)
+	var cursorUpdatedAt int64
+	cursorKey := ""
 
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 
-		reqs, err := s.fetchSince(ctx, lastSeen, s.batchSize)
+		reqs, err := s.fetchSince(ctx, cursorUpdatedAt, cursorKey, s.batchSize)
 		if err == nil {
-			for _, req := range reqs {
-				seenAt := req.RequestedAt.UTC().UnixNano()
-				if prev, ok := seen[req.Key]; ok && prev == seenAt {
-					continue
-				}
-				seen[req.Key] = seenAt
-				if req.RequestedAt.After(lastSeen) {
-					lastSeen = req.RequestedAt
-				}
+			for _, evt := range reqs {
+				cursorUpdatedAt = evt.updatedAt
+				cursorKey = evt.request.Key
 				select {
 				case <-ctx.Done():
 					return
-				case out <- req:
+				case out <- evt.request:
 				}
 			}
 		}
@@ -227,7 +237,12 @@ func (s *Store) poll(ctx context.Context, out chan<- cancellation.Request) {
 	}
 }
 
-func (s *Store) fetchSince(ctx context.Context, since time.Time, limit int) ([]cancellation.Request, error) {
+type subscriptionEvent struct {
+	request   cancellation.Request
+	updatedAt int64
+}
+
+func (s *Store) fetchSince(ctx context.Context, sinceUpdatedAt int64, sinceKey string, limit int) ([]subscriptionEvent, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("postgres cancellation store not configured")
 	}
@@ -236,29 +251,76 @@ func (s *Store) fetchSince(ctx context.Context, since time.Time, limit int) ([]c
 	}
 
 	p := s.placeholder
-	query := fmt.Sprintf(`SELECT key, reason, requested_at FROM %s WHERE requested_at >= %s ORDER BY requested_at ASC LIMIT %s`, s.table, p(1), p(2))
-	rows, err := s.db.QueryContext(ctx, query, since.UTC().UnixNano(), limit)
+	query := fmt.Sprintf(`SELECT key, reason, requested_at, updated_at
+FROM %s
+WHERE (updated_at > %s OR (updated_at = %s AND key > %s))
+ORDER BY updated_at ASC, key ASC
+LIMIT %s`, s.table, p(1), p(2), p(3), p(4))
+	rows, err := s.db.QueryContext(ctx, query, sinceUpdatedAt, sinceUpdatedAt, sinceKey, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var out []cancellation.Request
+	var out []subscriptionEvent
 	for rows.Next() {
 		var key string
 		var reason string
 		var requestedAt int64
-		if err := rows.Scan(&key, &reason, &requestedAt); err != nil {
+		var updatedAt int64
+		if err := rows.Scan(&key, &reason, &requestedAt, &updatedAt); err != nil {
 			return nil, err
 		}
-		out = append(out, cancellation.Request{
-			Key:         key,
-			Reason:      reason,
-			RequestedAt: time.Unix(0, requestedAt).UTC(),
+		out = append(out, subscriptionEvent{
+			request: cancellation.Request{
+				Key:         key,
+				Reason:      reason,
+				RequestedAt: time.Unix(0, requestedAt).UTC(),
+			},
+			updatedAt: updatedAt,
 		})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+func (s *Store) validateIdentifier() error {
+	return validateSQLIdentifier("cancellation table", s.table)
+}
+
+func validateSQLIdentifier(label, value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("%s identifier required", label)
+	}
+	parts := strings.Split(value, ".")
+	for _, part := range parts {
+		if !isSQLIdentifierPart(part) {
+			return fmt.Errorf("invalid %s identifier %q", label, value)
+		}
+	}
+	return nil
+}
+
+func isSQLIdentifierPart(part string) bool {
+	if part == "" {
+		return false
+	}
+	for idx := 0; idx < len(part); idx++ {
+		ch := part[idx]
+		isLetter := (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+		isDigit := ch >= '0' && ch <= '9'
+		if idx == 0 {
+			if !isLetter && ch != '_' {
+				return false
+			}
+			continue
+		}
+		if !isLetter && !isDigit && ch != '_' {
+			return false
+		}
+	}
+	return true
 }
