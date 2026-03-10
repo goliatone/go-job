@@ -383,16 +383,16 @@ func (w *Worker) handleDelivery(ctx context.Context, delivery queue.Delivery) {
 
 	if msg == nil {
 		w.failDelivery(ctx, event, fmt.Errorf("delivery message required"), queue.NackOptions{
-			DeadLetter: true,
-			Reason:     "delivery message required",
+			Disposition: queue.NackDispositionDeadLetter,
+			Reason:      "delivery message required",
 		})
 		return
 	}
 
 	if err := queue.ValidateRequiredMessage(msg); err != nil {
 		w.failDelivery(ctx, event, err, queue.NackOptions{
-			DeadLetter: true,
-			Reason:     err.Error(),
+			Disposition: queue.NackDispositionDeadLetter,
+			Reason:      err.Error(),
 		})
 		return
 	}
@@ -400,8 +400,8 @@ func (w *Worker) handleDelivery(ctx context.Context, delivery queue.Delivery) {
 	entry, ok := w.registry.Get(msg.JobID)
 	if !ok || entry.Task == nil {
 		w.failDelivery(ctx, event, fmt.Errorf("task %q not registered", msg.JobID), queue.NackOptions{
-			DeadLetter: true,
-			Reason:     "task not registered",
+			Disposition: queue.NackDispositionDeadLetter,
+			Reason:      "task not registered",
 		})
 		return
 	}
@@ -409,8 +409,8 @@ func (w *Worker) handleDelivery(ctx context.Context, delivery queue.Delivery) {
 
 	if msg.ScriptPath != "" && msg.ScriptPath != entry.Task.GetPath() {
 		w.failDelivery(ctx, event, fmt.Errorf("script path mismatch for task %q", msg.JobID), queue.NackOptions{
-			DeadLetter: true,
-			Reason:     "script path mismatch",
+			Disposition: queue.NackDispositionDeadLetter,
+			Reason:      "script path mismatch",
 		})
 		return
 	}
@@ -470,11 +470,17 @@ func (w *Worker) handleDelivery(ctx context.Context, delivery queue.Delivery) {
 }
 
 func (w *Worker) failDelivery(ctx context.Context, event Event, err error, opts queue.NackOptions) {
+	if validateErr := queue.ValidateNackOptions(opts); validateErr != nil {
+		opts = queue.NackOptions{
+			Disposition: queue.NackDispositionFailed,
+			Reason:      validateErr.Error(),
+		}
+	}
 	event.Err = err
 	event.Duration = time.Since(event.StartedAt)
 	event.Delay = opts.Delay
 
-	if opts.Requeue {
+	if opts.Disposition == queue.NackDispositionRetry {
 		w.logRetry(event)
 		w.emitRetry(ctx, event)
 	} else {
