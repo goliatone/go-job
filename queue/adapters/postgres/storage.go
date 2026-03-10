@@ -161,24 +161,12 @@ func (s *Storage) Cleanup(ctx context.Context) error {
 }
 
 // Enqueue stores the message for delivery.
-func (s *Storage) Enqueue(ctx context.Context, msg *job.ExecutionMessage) error {
-	_, err := s.EnqueueWithReceipt(ctx, msg)
-	return err
-}
-
-// EnqueueWithReceipt stores the message for delivery and returns dispatch metadata.
-func (s *Storage) EnqueueWithReceipt(ctx context.Context, msg *job.ExecutionMessage) (queue.EnqueueReceipt, error) {
-	return s.EnqueueAtWithReceipt(ctx, msg, s.now())
+func (s *Storage) Enqueue(ctx context.Context, msg *job.ExecutionMessage) (queue.EnqueueReceipt, error) {
+	return s.EnqueueAt(ctx, msg, s.now())
 }
 
 // EnqueueAt stores a message for delivery at the given time.
-func (s *Storage) EnqueueAt(ctx context.Context, msg *job.ExecutionMessage, at time.Time) error {
-	_, err := s.EnqueueAtWithReceipt(ctx, msg, at)
-	return err
-}
-
-// EnqueueAtWithReceipt stores a message for delivery at the given time and returns dispatch metadata.
-func (s *Storage) EnqueueAtWithReceipt(ctx context.Context, msg *job.ExecutionMessage, at time.Time) (queue.EnqueueReceipt, error) {
+func (s *Storage) EnqueueAt(ctx context.Context, msg *job.ExecutionMessage, at time.Time) (queue.EnqueueReceipt, error) {
 	if s == nil || s.db == nil {
 		return queue.EnqueueReceipt{}, fmt.Errorf("postgres storage not configured")
 	}
@@ -211,18 +199,12 @@ VALUES (%s, %s, 0, %s, 0, '', %s, %s)`, s.table, p(1), p(2), p(3), p(4), p(5))
 }
 
 // EnqueueAfter stores a message for delivery after the provided delay.
-func (s *Storage) EnqueueAfter(ctx context.Context, msg *job.ExecutionMessage, delay time.Duration) error {
-	_, err := s.EnqueueAfterWithReceipt(ctx, msg, delay)
-	return err
-}
-
-// EnqueueAfterWithReceipt stores a message for delivery after the provided delay and returns dispatch metadata.
-func (s *Storage) EnqueueAfterWithReceipt(ctx context.Context, msg *job.ExecutionMessage, delay time.Duration) (queue.EnqueueReceipt, error) {
+func (s *Storage) EnqueueAfter(ctx context.Context, msg *job.ExecutionMessage, delay time.Duration) (queue.EnqueueReceipt, error) {
 	at := s.now()
 	if delay > 0 {
 		at = at.Add(delay)
 	}
-	return s.EnqueueAtWithReceipt(ctx, msg, at)
+	return s.EnqueueAt(ctx, msg, at)
 }
 
 // Dequeue leases the next available message.
@@ -336,7 +318,6 @@ func (s *Storage) ExtendLease(ctx context.Context, receipt queue.Receipt, ttl ti
 func (s *Storage) GetDispatchStatus(ctx context.Context, dispatchID string) (queue.DispatchStatus, error) {
 	status := queue.DispatchStatus{
 		DispatchID: strings.TrimSpace(dispatchID),
-		State:      queue.DispatchStateUnknown,
 	}
 	if s == nil || s.db == nil {
 		return status, fmt.Errorf("postgres storage not configured")
