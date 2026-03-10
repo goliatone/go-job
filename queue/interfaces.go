@@ -13,11 +13,15 @@ var (
 	ErrScheduledEnqueueUnsupported = fmt.Errorf("scheduled enqueue not supported")
 	// ErrLeaseExtensionUnsupported is returned when an adapter cannot extend a lease.
 	ErrLeaseExtensionUnsupported = fmt.Errorf("lease extension not supported")
+	// ErrDispatchStatusUnsupported is returned when an adapter cannot read dispatch status.
+	ErrDispatchStatusUnsupported = fmt.Errorf("dispatch status not supported")
+	// ErrDispatchNotFound is returned when no dispatch status exists for a dispatch id.
+	ErrDispatchNotFound = fmt.Errorf("dispatch not found")
 )
 
 // Enqueuer accepts execution messages for durable delivery.
 type Enqueuer interface {
-	Enqueue(ctx context.Context, msg *job.ExecutionMessage) error
+	Enqueue(ctx context.Context, msg *job.ExecutionMessage) (EnqueueReceipt, error)
 }
 
 // EnqueueReceipt contains queue acceptance metadata for a dispatched message.
@@ -26,23 +30,11 @@ type EnqueueReceipt struct {
 	EnqueuedAt time.Time
 }
 
-// ReceiptEnqueuer accepts execution messages and returns acceptance metadata.
-type ReceiptEnqueuer interface {
-	EnqueueWithReceipt(ctx context.Context, msg *job.ExecutionMessage) (EnqueueReceipt, error)
-}
-
 // ScheduledEnqueuer supports delayed/scheduled enqueue semantics.
 type ScheduledEnqueuer interface {
 	Enqueuer
-	EnqueueAt(ctx context.Context, msg *job.ExecutionMessage, at time.Time) error
-	EnqueueAfter(ctx context.Context, msg *job.ExecutionMessage, delay time.Duration) error
-}
-
-// ReceiptScheduledEnqueuer supports delayed/scheduled enqueue semantics with receipts.
-type ReceiptScheduledEnqueuer interface {
-	ReceiptEnqueuer
-	EnqueueAtWithReceipt(ctx context.Context, msg *job.ExecutionMessage, at time.Time) (EnqueueReceipt, error)
-	EnqueueAfterWithReceipt(ctx context.Context, msg *job.ExecutionMessage, delay time.Duration) (EnqueueReceipt, error)
+	EnqueueAt(ctx context.Context, msg *job.ExecutionMessage, at time.Time) (EnqueueReceipt, error)
+	EnqueueAfter(ctx context.Context, msg *job.ExecutionMessage, delay time.Duration) (EnqueueReceipt, error)
 }
 
 // Dequeuer returns the next delivery when available.
@@ -77,9 +69,10 @@ const (
 	DispatchStateAccepted   DispatchState = "accepted"
 	DispatchStateRunning    DispatchState = "running"
 	DispatchStateRetrying   DispatchState = "retrying"
+	DispatchStateCanceled   DispatchState = "canceled"
+	DispatchStateFailed     DispatchState = "failed"
 	DispatchStateDeadLetter DispatchState = "dead_letter"
 	DispatchStateSucceeded  DispatchState = "succeeded"
-	DispatchStateUnknown    DispatchState = "unknown"
 )
 
 // DispatchStatus represents the current inferred queue lifecycle state.
