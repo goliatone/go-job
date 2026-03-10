@@ -1,6 +1,9 @@
 package redis
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // ZItem represents a sorted set entry.
 type ZItem struct {
@@ -19,5 +22,6 @@ type Client interface {
 	ZAdd(ctx context.Context, key string, score float64, member string) error
 	ZRem(ctx context.Context, key string, members ...string) error
 	ZRangeByScore(ctx context.Context, key string, max float64, limit int64) ([]ZItem, error)
+	Expire(ctx context.Context, key string, ttl time.Duration) error
 	Del(ctx context.Context, keys ...string) error
 }
