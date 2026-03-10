@@ -2,6 +2,7 @@ package worker
 
 import (
 	"errors"
+	"math/rand"
 	"time"
 
 	job "github.com/goliatone/go-job"
@@ -34,6 +35,8 @@ const (
 	defaultBackoffInterval    = 100 * time.Millisecond
 	defaultBackoffMaxInterval = 5 * time.Second
 )
+
+var jitterRandFloat64 = rand.Float64
 
 // DefaultRetryPolicy provides simple max-attempts with backoff scheduling.
 // MaxAttempts <= 0 means no retries (dead-letter on first failure).
@@ -97,17 +100,38 @@ func computeBackoffDelay(attempt int, cfg BackoffConfig) time.Duration {
 
 	switch cfg.Strategy {
 	case BackoffFixed:
-		return interval
+		delay := interval
+		if cfg.Jitter {
+			delay = applyJitter(delay)
+		}
+		return delay
 	case BackoffExponential:
 		delay := interval
 		for i := 1; i < attempt; i++ {
 			delay *= 2
 			if delay > maxInterval {
-				return maxInterval
+				delay = maxInterval
+				break
 			}
+		}
+		if cfg.Jitter {
+			delay = applyJitter(delay)
 		}
 		return delay
 	default:
 		return 0
 	}
+}
+
+func applyJitter(delay time.Duration) time.Duration {
+	if delay <= 0 {
+		return 0
+	}
+	// Symmetric jitter in [0.5x, 1.5x] of base delay.
+	factor := 0.5 + jitterRandFloat64()
+	out := time.Duration(float64(delay) * factor)
+	if out <= 0 {
+		return time.Nanosecond
+	}
+	return out
 }
