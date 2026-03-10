@@ -653,6 +653,10 @@ func (c *fakeRedisClient) Del(_ context.Context, keys ...string) error {
 	return nil
 }
 
+func (c *fakeRedisClient) Expire(_ context.Context, _ string, _ time.Duration) error {
+	return nil
+}
+
 func (c *fakeRedisClient) HasKey(key string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()

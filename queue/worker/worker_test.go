@@ -110,8 +110,7 @@ func TestWorkerNacksWithRetry(t *testing.T) {
 	}
 
 	require.NoError(t, worker.Stop(context.Background()))
-	assert.True(t, opts.Requeue)
-	assert.False(t, opts.DeadLetter)
+	assert.Equal(t, queue.NackDispositionRetry, opts.Disposition)
 	assert.Equal(t, 10*time.Millisecond, opts.Delay)
 	assert.Equal(t, int32(1), atomic.LoadInt32(&retries))
 }
@@ -147,8 +146,7 @@ func TestWorkerRoutesToDLQOnFinalAttempt(t *testing.T) {
 	}
 
 	require.NoError(t, worker.Stop(context.Background()))
-	assert.True(t, opts.DeadLetter)
-	assert.False(t, opts.Requeue)
+	assert.Equal(t, queue.NackDispositionDeadLetter, opts.Disposition)
 	assert.Equal(t, int32(1), atomic.LoadInt32(&failures))
 }
 
@@ -228,8 +226,7 @@ func TestWorkerCancelsBeforeExecute(t *testing.T) {
 
 	require.NoError(t, worker.Stop(context.Background()))
 	assert.Equal(t, int32(0), atomic.LoadInt32(&execCount))
-	assert.False(t, opts.Requeue)
-	assert.False(t, opts.DeadLetter)
+	assert.Equal(t, queue.NackDispositionCanceled, opts.Disposition)
 	assert.Equal(t, "user", opts.Reason)
 }
 
@@ -281,8 +278,7 @@ func TestWorkerCancelsDuringExecution(t *testing.T) {
 	}
 
 	require.NoError(t, worker.Stop(context.Background()))
-	assert.False(t, opts.Requeue)
-	assert.False(t, opts.DeadLetter)
+	assert.Equal(t, queue.NackDispositionCanceled, opts.Disposition)
 	assert.Equal(t, "timeout", opts.Reason)
 }
 
@@ -468,8 +464,7 @@ func TestWorkerDeadLettersTerminalStaleResumeError(t *testing.T) {
 	}
 
 	require.NoError(t, worker.Stop(context.Background()))
-	assert.True(t, opts.DeadLetter)
-	assert.False(t, opts.Requeue)
+	assert.Equal(t, queue.NackDispositionDeadLetter, opts.Disposition)
 	assert.Equal(t, "stale resume expected state mismatch", opts.Reason)
 }
 

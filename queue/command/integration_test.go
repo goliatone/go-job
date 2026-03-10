@@ -80,7 +80,7 @@ func TestCommandBridgeIntegrationEnqueueWorkerConsumeSuccess(t *testing.T) {
 
 	require.Eventually(t, func() bool {
 		status, err := adapter.GetDispatchStatus(context.Background(), receipt.DispatchID)
-		return err == nil && status.State == queue.DispatchStateSucceeded && status.Inferred
+		return err == nil && status.State == queue.DispatchStateSucceeded
 	}, 2*time.Second, 20*time.Millisecond)
 }
 

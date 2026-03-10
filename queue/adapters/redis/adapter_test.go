@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -68,9 +69,9 @@ func TestAdapterEnqueueReceiptsAndDispatchStatusLifecycle(t *testing.T) {
 	assert.Equal(t, queue.DispatchStateRunning, status.State)
 
 	require.NoError(t, delivery.Nack(ctx, queue.NackOptions{
-		Delay:   5 * time.Second,
-		Requeue: true,
-		Reason:  "retry",
+		Disposition: queue.NackDispositionRetry,
+		Delay:       5 * time.Second,
+		Reason:      "retry",
 	}))
 	status, err = adapter.GetDispatchStatus(ctx, receipt.DispatchID)
 	require.NoError(t, err)
@@ -82,8 +83,8 @@ func TestAdapterEnqueueReceiptsAndDispatchStatusLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, delivery)
 	require.NoError(t, delivery.Nack(ctx, queue.NackOptions{
-		DeadLetter: true,
-		Reason:     "fatal",
+		Disposition: queue.NackDispositionDeadLetter,
+		Reason:      "fatal",
 	}))
 
 	status, err = adapter.GetDispatchStatus(ctx, receipt.DispatchID)
@@ -101,7 +102,6 @@ func TestAdapterEnqueueReceiptsAndDispatchStatusLifecycle(t *testing.T) {
 	status2, err := adapter.GetDispatchStatus(ctx, receipt2.DispatchID)
 	require.NoError(t, err)
 	assert.Equal(t, queue.DispatchStateSucceeded, status2.State)
-	assert.True(t, status2.Inferred)
 }
 
 func TestAdapterScheduledReceiptVariants(t *testing.T) {
@@ -125,10 +125,104 @@ func TestAdapterScheduledReceiptVariants(t *testing.T) {
 	require.NotEmpty(t, r2.DispatchID)
 }
 
+func TestAdapterDispatchStatusTerminalFailedAndCanceled(t *testing.T) {
+	client := newFakeClient()
+	clock := newManualClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	storage := NewStorage(client,
+		WithClock(clock.Now),
+		WithVisibilityTimeout(10*time.Second),
+		WithIDFunc(sequence("msg-1", "msg-2")),
+		WithTokenFunc(sequence("token-1", "token-2")),
+	)
+	adapter := NewAdapter(storage)
+	ctx := context.Background()
+	msg := &job.ExecutionMessage{JobID: "export", ScriptPath: "/tmp/export"}
+
+	failedReceipt, err := adapter.Enqueue(ctx, msg)
+	require.NoError(t, err)
+	failedDelivery, err := adapter.Dequeue(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, failedDelivery)
+	require.NoError(t, failedDelivery.Nack(ctx, queue.NackOptions{
+		Disposition: queue.NackDispositionFailed,
+		Reason:      "failed-terminal",
+	}))
+
+	status, err := adapter.GetDispatchStatus(ctx, failedReceipt.DispatchID)
+	require.NoError(t, err)
+	assert.Equal(t, queue.DispatchStateFailed, status.State)
+	assert.Equal(t, "failed-terminal", status.TerminalReason)
+
+	canceledReceipt, err := adapter.Enqueue(ctx, msg)
+	require.NoError(t, err)
+	canceledDelivery, err := adapter.Dequeue(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, canceledDelivery)
+	require.NoError(t, canceledDelivery.Nack(ctx, queue.NackOptions{
+		Disposition: queue.NackDispositionCanceled,
+		Reason:      "canceled-terminal",
+	}))
+
+	status, err = adapter.GetDispatchStatus(ctx, canceledReceipt.DispatchID)
+	require.NoError(t, err)
+	assert.Equal(t, queue.DispatchStateCanceled, status.State)
+	assert.Equal(t, "canceled-terminal", status.TerminalReason)
+}
+
 func TestAdapterGetDispatchStatusUnsupported(t *testing.T) {
 	adapter := NewAdapter(stubStorageNoStatus{})
 	_, err := adapter.GetDispatchStatus(context.Background(), "dispatch-1")
 	require.ErrorIs(t, err, queue.ErrDispatchStatusUnsupported)
+}
+
+func TestAdapterGetDispatchStatusNotFound(t *testing.T) {
+	client := newFakeClient()
+	storage := NewStorage(client)
+	adapter := NewAdapter(storage)
+
+	_, err := adapter.GetDispatchStatus(context.Background(), "missing-dispatch")
+	require.ErrorIs(t, err, queue.ErrDispatchNotFound)
+}
+
+func TestStorageLegacyMessageBecomesStatusTrackedOnTransition(t *testing.T) {
+	client := newFakeClient()
+	clock := newManualClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	storage := NewStorage(client,
+		WithClock(clock.Now),
+		WithVisibilityTimeout(10*time.Second),
+		WithIDFunc(sequence("legacy-1")),
+		WithTokenFunc(sequence("token-legacy")),
+	)
+	ctx := context.Background()
+
+	msg := &job.ExecutionMessage{JobID: "legacy", ScriptPath: "/tmp/legacy"}
+	payload, err := queue.EncodeExecutionMessage(msg)
+	require.NoError(t, err)
+
+	now := clock.Now().UTC().UnixNano()
+	require.NoError(t, client.HSet(ctx, storage.keys.message("legacy-1"), map[string]string{
+		fieldPayload:   string(payload),
+		fieldAttempts:  "0",
+		fieldToken:     "",
+		fieldAvailable: strconv.FormatInt(now, 10),
+		fieldCreatedAt: strconv.FormatInt(now, 10),
+		fieldUpdatedAt: strconv.FormatInt(now, 10),
+	}))
+	require.NoError(t, client.LPush(ctx, storage.keys.ready(), "legacy-1"))
+
+	adapter := NewAdapter(storage)
+	delivery, err := adapter.Dequeue(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, delivery)
+
+	status, err := adapter.GetDispatchStatus(ctx, "legacy-1")
+	require.NoError(t, err)
+	assert.Equal(t, queue.DispatchStateRunning, status.State)
+
+	require.NoError(t, delivery.Ack(ctx))
+	status, err = adapter.GetDispatchStatus(ctx, "legacy-1")
+	require.NoError(t, err)
+	assert.Equal(t, queue.DispatchStateSucceeded, status.State)
 }
 
 func TestStorageNackDelayedRetry(t *testing.T) {
@@ -150,9 +244,9 @@ func TestStorageNackDelayedRetry(t *testing.T) {
 	require.False(t, receipt.CreatedAt.IsZero())
 
 	require.NoError(t, storage.Nack(context.Background(), receipt, queue.NackOptions{
-		Delay:   5 * time.Second,
-		Requeue: true,
-		Reason:  "retry",
+		Disposition: queue.NackDispositionRetry,
+		Delay:       5 * time.Second,
+		Reason:      "retry",
 	}))
 
 	none, _, err := storage.Dequeue(context.Background())
@@ -213,8 +307,8 @@ func TestStorageDeadLetters(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, storage.Nack(context.Background(), receipt, queue.NackOptions{
-		DeadLetter: true,
-		Reason:     "fatal",
+		Disposition: queue.NackDispositionDeadLetter,
+		Reason:      "fatal",
 	}))
 
 	dlq := client.List(storage.keys.dlq())
@@ -432,6 +526,10 @@ func (c *fakeClient) Del(_ context.Context, keys ...string) error {
 		delete(c.lists, key)
 		delete(c.zsets, key)
 	}
+	return nil
+}
+
+func (c *fakeClient) Expire(_ context.Context, _ string, _ time.Duration) error {
 	return nil
 }
 

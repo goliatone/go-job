@@ -58,9 +58,9 @@ func TestAdapterEnqueueReceiptsAndDispatchStatusLifecycle(t *testing.T) {
 	assert.Equal(t, queue.DispatchStateRunning, status.State)
 
 	require.NoError(t, delivery.Nack(ctx, queue.NackOptions{
-		Delay:   5 * time.Second,
-		Requeue: true,
-		Reason:  "retry",
+		Disposition: queue.NackDispositionRetry,
+		Delay:       5 * time.Second,
+		Reason:      "retry",
 	}))
 	status, err = adapter.GetDispatchStatus(ctx, receipt.DispatchID)
 	require.NoError(t, err)
@@ -72,8 +72,8 @@ func TestAdapterEnqueueReceiptsAndDispatchStatusLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, delivery)
 	require.NoError(t, delivery.Nack(ctx, queue.NackOptions{
-		DeadLetter: true,
-		Reason:     "fatal",
+		Disposition: queue.NackDispositionDeadLetter,
+		Reason:      "fatal",
 	}))
 
 	status, err = adapter.GetDispatchStatus(ctx, receipt.DispatchID)
@@ -91,7 +91,6 @@ func TestAdapterEnqueueReceiptsAndDispatchStatusLifecycle(t *testing.T) {
 	status2, err := adapter.GetDispatchStatus(ctx, receipt2.DispatchID)
 	require.NoError(t, err)
 	assert.Equal(t, queue.DispatchStateSucceeded, status2.State)
-	assert.True(t, status2.Inferred)
 }
 
 func TestAdapterScheduledReceiptVariants(t *testing.T) {
@@ -111,10 +110,86 @@ func TestAdapterScheduledReceiptVariants(t *testing.T) {
 	require.NotEmpty(t, r2.DispatchID)
 }
 
+func TestAdapterDispatchStatusTerminalFailedAndCanceled(t *testing.T) {
+	storage, cleanup := setupStorage(t)
+	defer cleanup()
+	adapter := NewAdapter(storage)
+	ctx := context.Background()
+
+	msg := &job.ExecutionMessage{JobID: "export", ScriptPath: "/tmp/export"}
+	failedReceipt, err := adapter.Enqueue(ctx, msg)
+	require.NoError(t, err)
+	failedDelivery, err := adapter.Dequeue(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, failedDelivery)
+	require.NoError(t, failedDelivery.Nack(ctx, queue.NackOptions{
+		Disposition: queue.NackDispositionFailed,
+		Reason:      "failed-terminal",
+	}))
+
+	status, err := adapter.GetDispatchStatus(ctx, failedReceipt.DispatchID)
+	require.NoError(t, err)
+	assert.Equal(t, queue.DispatchStateFailed, status.State)
+	assert.Equal(t, "failed-terminal", status.TerminalReason)
+
+	canceledReceipt, err := adapter.Enqueue(ctx, msg)
+	require.NoError(t, err)
+	canceledDelivery, err := adapter.Dequeue(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, canceledDelivery)
+	require.NoError(t, canceledDelivery.Nack(ctx, queue.NackOptions{
+		Disposition: queue.NackDispositionCanceled,
+		Reason:      "canceled-terminal",
+	}))
+
+	status, err = adapter.GetDispatchStatus(ctx, canceledReceipt.DispatchID)
+	require.NoError(t, err)
+	assert.Equal(t, queue.DispatchStateCanceled, status.State)
+	assert.Equal(t, "canceled-terminal", status.TerminalReason)
+}
+
 func TestAdapterGetDispatchStatusUnsupported(t *testing.T) {
 	adapter := NewAdapter(stubStorageNoStatus{})
 	_, err := adapter.GetDispatchStatus(context.Background(), "dispatch-1")
 	require.ErrorIs(t, err, queue.ErrDispatchStatusUnsupported)
+}
+
+func TestAdapterGetDispatchStatusNotFound(t *testing.T) {
+	storage, cleanup := setupStorage(t)
+	defer cleanup()
+
+	adapter := NewAdapter(storage)
+	_, err := adapter.GetDispatchStatus(context.Background(), "missing-dispatch")
+	require.ErrorIs(t, err, queue.ErrDispatchNotFound)
+}
+
+func TestStorageLegacyMessageBecomesStatusTrackedOnTransition(t *testing.T) {
+	storage, cleanup := setupStorage(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	msg := &job.ExecutionMessage{JobID: "legacy", ScriptPath: "/tmp/legacy"}
+	payload, err := queue.EncodeExecutionMessage(msg)
+	require.NoError(t, err)
+
+	now := storage.clock.Now().UTC().UnixNano()
+	_, err = storage.db.ExecContext(ctx, "INSERT INTO "+storage.table+" (id, payload, attempts, available_at, leased_until, token, created_at, updated_at) VALUES (?, ?, 0, ?, 0, '', ?, ?)",
+		"legacy-1", string(payload), now, now, now)
+	require.NoError(t, err)
+
+	adapter := NewAdapter(storage)
+	delivery, err := adapter.Dequeue(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, delivery)
+
+	status, err := adapter.GetDispatchStatus(ctx, "legacy-1")
+	require.NoError(t, err)
+	assert.Equal(t, queue.DispatchStateRunning, status.State)
+
+	require.NoError(t, delivery.Ack(ctx))
+	status, err = adapter.GetDispatchStatus(ctx, "legacy-1")
+	require.NoError(t, err)
+	assert.Equal(t, queue.DispatchStateSucceeded, status.State)
 }
 
 func TestStorageNackDelayedRetry(t *testing.T) {
@@ -130,9 +205,9 @@ func TestStorageNackDelayedRetry(t *testing.T) {
 	require.False(t, receipt.CreatedAt.IsZero())
 
 	require.NoError(t, storage.Nack(context.Background(), receipt, queue.NackOptions{
-		Delay:   5 * time.Second,
-		Requeue: true,
-		Reason:  "retry",
+		Disposition: queue.NackDispositionRetry,
+		Delay:       5 * time.Second,
+		Reason:      "retry",
 	}))
 
 	none, _, err := storage.Dequeue(context.Background())
@@ -181,8 +256,8 @@ func TestStorageDeadLetters(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, storage.Nack(context.Background(), receipt, queue.NackOptions{
-		DeadLetter: true,
-		Reason:     "fatal",
+		Disposition: queue.NackDispositionDeadLetter,
+		Reason:      "fatal",
 	}))
 
 	assert.Equal(t, 1, countRows(t, storage.db, storage.dlqTable))

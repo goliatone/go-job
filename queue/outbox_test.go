@@ -197,11 +197,11 @@ func (s *outboxMemoryStorage) Nack(_ context.Context, receipt Receipt, opts Nack
 	if opts.Reason != "" {
 		entry.lastError = opts.Reason
 	}
-	if opts.DeadLetter {
+	if opts.Disposition == NackDispositionDeadLetter {
 		entry.done = true
 		return nil
 	}
-	if opts.Requeue {
+	if opts.Disposition == NackDispositionRetry {
 		entry.available = now.Add(opts.Delay)
 		return nil
 	}
