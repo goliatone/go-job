@@ -2,75 +2,35 @@
 
 # [0.17.0](https://github.com/goliatone/go-job/compare/v0.16.0...v0.17.0) - (2026-03-10)
 
-## ⚠️ Breaking
+## <!-- 1 -->🐛 Bug Fixes
 
-- Queue enqueue contracts are now receipt-first:
-  - `queue.Enqueuer.Enqueue(ctx, msg)` now returns `(queue.EnqueueReceipt, error)`.
-  - `queue.ScheduledEnqueuer.EnqueueAt/EnqueueAfter` now return `(queue.EnqueueReceipt, error)`.
-- Removed compatibility bridge interfaces:
-  - `queue.ReceiptEnqueuer`
-  - `queue.ReceiptScheduledEnqueuer`
-  - `queue.ReceiptStorage`
-  - `queue.ReceiptScheduledStorage`
-- `queue/command.Enqueue`, `EnqueueAt`, and `EnqueueAfter` now return `(queue.EnqueueReceipt, error)`.
-- Queue command registration is strict by default: duplicate `command_id` registration now returns an explicit conflict error.
-- `queue.NackOptions` now requires explicit `Disposition` semantics:
-  - `retry`
-  - `dead_letter`
-  - `failed`
-  - `canceled`
-  - Removed legacy boolean routing flags (`Requeue`, `DeadLetter`).
-- Dispatch status reads are now authoritative and durable:
-  - Unknown/expired dispatch ids return `queue.ErrDispatchNotFound`.
-  - Removed inferred-success behavior from missing queue rows/hashes.
-  - `queue.DispatchStatus` no longer includes `Inferred`.
+- Centralize logic and clean up interfaces ([ab85bd8](https://github.com/goliatone/go-job/commit/ab85bd89298bdfb9f84f9ebd5efebf8145765cbb))  - (goliatone)
 
-## ➕ Add
+## <!-- 13 -->📦 Bumps
 
-- Added cross-repo compatibility task `dev:test:cross` to validate `go-job` + local `go-command` workspace contracts.
+- Bump version: v0.17.0 ([993b76c](https://github.com/goliatone/go-job/commit/993b76c1b55c0b840ff713c0d294a2a87b697b54))  - (goliatone)
 
-## 🔁 Status Contract
+## <!-- 16 -->➕ Add
 
-- `Adapter.GetDispatchStatus` now returns `queue.ErrDispatchStatusUnsupported` when the backing storage does not implement `queue.DispatchStatusReader`.
-- Added status constants for lifecycle parity surfaces:
-  - `queue.DispatchStateCanceled`
-  - `queue.DispatchStateFailed`
-- Postgres and Redis adapters now persist lifecycle transitions in dedicated status records (default retention TTL: 7 days).
-- Status transitions are written on enqueue/dequeue/ack/nack/lease boundaries, including migration-safe tracking for legacy queued messages on first transition.
+- Nack in cancel options ([f26880b](https://github.com/goliatone/go-job/commit/f26880b68fa7636e92631a26cb0e7876175aeaac))  - (goliatone)
+- Queue option validation for nack ([991eb1b](https://github.com/goliatone/go-job/commit/991eb1bf65008d72cdc35b6667f31607e44fa978))  - (goliatone)
+- Nack options ([6ecb8da](https://github.com/goliatone/go-job/commit/6ecb8dab85a26c64adaea636c36019cf878db9e1))  - (goliatone)
+- Updated semantics for retry ([ca65afc](https://github.com/goliatone/go-job/commit/ca65afc2daf81b386c1afafc424e4a0ceb0680c8))  - (goliatone)
+- Status and TTL for redis storage ([f4b8972](https://github.com/goliatone/go-job/commit/f4b897250683b2f9c17ed87737333ea6c9025502))  - (goliatone)
+- Status key ([a56f3b1](https://github.com/goliatone/go-job/commit/a56f3b194b81b831c0a4b848f3cdd831a961d169))  - (goliatone)
+- Expire command to client redis ([fafc3b9](https://github.com/goliatone/go-job/commit/fafc3b9ee5bc992dfb7668028ad484527c44d847))  - (goliatone)
+- Status table to postgres ([b68b444](https://github.com/goliatone/go-job/commit/b68b44471102fffff5c531f6060909b3a78185a8))  - (goliatone)
+- Postgres storage for queue revised ([105386b](https://github.com/goliatone/go-job/commit/105386b96a760bfb4302bd6a43d83364f5333ee2))  - (goliatone)
+- Fix card items stack flow ([2dfc00e](https://github.com/goliatone/go-job/commit/2dfc00e5d8d62d7a700f202bc892a6b46c71771e))  - (goliatone)
 
-## 📚 Migration
+## <!-- 3 -->📚 Documentation
 
-Before:
+- Update changelog for v0.16.0 ([016d3e6](https://github.com/goliatone/go-job/commit/016d3e669347d2c47bde05785c4a009e4f22d7b7))  - (goliatone)
 
-```go
-_ = adapter.Enqueue(ctx, msg)
-_ = adapter.EnqueueAfter(ctx, msg, 30*time.Second)
-_ = queuecmd.Enqueue(ctx, adapter, reg, id, params)
-```
+## <!-- 7 -->⚙️ Miscellaneous Tasks
 
-After:
-
-```go
-receipt, err := adapter.Enqueue(ctx, msg)
-if err != nil { return err }
-
-scheduled, err := adapter.EnqueueAfter(ctx, msg, 30*time.Second)
-if err != nil { return err }
-
-cmdReceipt, err := queuecmd.Enqueue(ctx, adapter, reg, id, params)
-if err != nil { return err }
-_ = receipt.DispatchID
-_ = scheduled.DispatchID
-_ = cmdReceipt.DispatchID
-```
-
-Resolver registration guidance (single-path wiring):
-
-```go
-// Use resolver-driven queue registration OR direct queue registration, not both.
-_ = cmdRegistry.AddResolver("queue", queuecmd.QueueResolver(queueRegistry))
-_, _ = queuecmd.RegisterCommandWithRegistry(queueRegistry, myCommand)
-```
+- Update docs ([6cf9bf8](https://github.com/goliatone/go-job/commit/6cf9bf8a99f0982a949cc942dc95d99b7eb26d0b))  - (goliatone)
+- Update tests ([fb015ac](https://github.com/goliatone/go-job/commit/fb015ac1f80d87b2f1a71cbc8238752e159a8bb9))  - (goliatone)
 
 # [0.16.0](https://github.com/goliatone/go-job/compare/v0.15.0...v0.16.0) - (2026-03-09)
 
