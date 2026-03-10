@@ -14,6 +14,16 @@
   - `queue.ReceiptScheduledStorage`
 - `queue/command.Enqueue`, `EnqueueAt`, and `EnqueueAfter` now return `(queue.EnqueueReceipt, error)`.
 - Queue command registration is strict by default: duplicate `command_id` registration now returns an explicit conflict error.
+- `queue.NackOptions` now requires explicit `Disposition` semantics:
+  - `retry`
+  - `dead_letter`
+  - `failed`
+  - `canceled`
+  - Removed legacy boolean routing flags (`Requeue`, `DeadLetter`).
+- Dispatch status reads are now authoritative and durable:
+  - Unknown/expired dispatch ids return `queue.ErrDispatchNotFound`.
+  - Removed inferred-success behavior from missing queue rows/hashes.
+  - `queue.DispatchStatus` no longer includes `Inferred`.
 
 ## ➕ Add
 
@@ -25,6 +35,8 @@
 - Added status constants for lifecycle parity surfaces:
   - `queue.DispatchStateCanceled`
   - `queue.DispatchStateFailed`
+- Postgres and Redis adapters now persist lifecycle transitions in dedicated status records (default retention TTL: 7 days).
+- Status transitions are written on enqueue/dequeue/ack/nack/lease boundaries, including migration-safe tracking for legacy queued messages on first transition.
 
 ## 📚 Migration
 
