@@ -444,6 +444,10 @@ func (w *Worker) handleDelivery(ctx context.Context, delivery queue.Delivery) {
 	if execErr == nil {
 		if err := delivery.Ack(ctx); err != nil {
 			w.logAckError(event, err)
+			event.Err = fmt.Errorf("ack failed after execute: %w", err)
+			w.logFailure(event)
+			w.emitFailure(ctx, event)
+			return
 		}
 		w.logSuccess(event)
 		w.emitSuccess(ctx, event)
@@ -452,6 +456,10 @@ func (w *Worker) handleDelivery(ctx context.Context, delivery queue.Delivery) {
 	if errors.Is(execErr, job.ErrIdempotentDrop) {
 		if err := delivery.Ack(ctx); err != nil {
 			w.logAckError(event, err)
+			event.Err = fmt.Errorf("ack failed after idempotent drop: %w", err)
+			w.logFailure(event)
+			w.emitFailure(ctx, event)
+			return
 		}
 		w.logSuccess(event)
 		w.emitSuccess(ctx, event)
