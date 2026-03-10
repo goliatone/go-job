@@ -4,10 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/goliatone/go-job/queue/cancellation"
+	"github.com/goliatone/go-job/queue/internal/sqlutil"
 )
 
 const (
@@ -287,40 +287,5 @@ LIMIT %s`, s.table, p(1), p(2), p(3), p(4))
 }
 
 func (s *Store) validateIdentifier() error {
-	return validateSQLIdentifier("cancellation table", s.table)
-}
-
-func validateSQLIdentifier(label, value string) error {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return fmt.Errorf("%s identifier required", label)
-	}
-	parts := strings.Split(value, ".")
-	for _, part := range parts {
-		if !isSQLIdentifierPart(part) {
-			return fmt.Errorf("invalid %s identifier %q", label, value)
-		}
-	}
-	return nil
-}
-
-func isSQLIdentifierPart(part string) bool {
-	if part == "" {
-		return false
-	}
-	for idx := 0; idx < len(part); idx++ {
-		ch := part[idx]
-		isLetter := (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
-		isDigit := ch >= '0' && ch <= '9'
-		if idx == 0 {
-			if !isLetter && ch != '_' {
-				return false
-			}
-			continue
-		}
-		if !isLetter && !isDigit && ch != '_' {
-			return false
-		}
-	}
-	return true
+	return sqlutil.ValidateIdentifier("cancellation table", s.table)
 }

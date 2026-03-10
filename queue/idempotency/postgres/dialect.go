@@ -1,34 +1,17 @@
 package postgres
 
+import "github.com/goliatone/go-job/queue/internal/sqlutil"
+
 // Dialect controls SQL placeholder formatting.
-type Dialect string
+type Dialect = sqlutil.Dialect
 
 const (
-	DialectPostgres Dialect = "postgres"
-	DialectSQLite   Dialect = "sqlite"
+	DialectPostgres = sqlutil.DialectPostgres
+	DialectSQLite   = sqlutil.DialectSQLite
 )
 
-type placeholderFunc func(int) string
+type placeholderFunc = sqlutil.PlaceholderFunc
 
 func placeholderFor(dialect Dialect) placeholderFunc {
-	switch dialect {
-	case DialectSQLite:
-		return func(_ int) string { return "?" }
-	default:
-		return func(i int) string { return "$" + itoa(i) }
-	}
-}
-
-func itoa(value int) string {
-	if value == 0 {
-		return "0"
-	}
-	var buf [20]byte
-	i := len(buf)
-	for value > 0 {
-		i--
-		buf[i] = byte('0' + value%10)
-		value /= 10
-	}
-	return string(buf[i:])
+	return sqlutil.PlaceholderFor(dialect)
 }

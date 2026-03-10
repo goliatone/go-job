@@ -12,6 +12,7 @@ import (
 
 	job "github.com/goliatone/go-job"
 	"github.com/goliatone/go-job/queue"
+	"github.com/goliatone/go-job/queue/internal/sqlutil"
 )
 
 const (
@@ -823,46 +824,11 @@ func ptrTime(value time.Time) *time.Time {
 }
 
 func (s *Storage) validateIdentifiers() error {
-	if err := validateSQLIdentifier("queue table", s.table); err != nil {
+	if err := sqlutil.ValidateIdentifier("queue table", s.table); err != nil {
 		return err
 	}
-	if err := validateSQLIdentifier("queue dlq table", s.dlqTable); err != nil {
+	if err := sqlutil.ValidateIdentifier("queue dlq table", s.dlqTable); err != nil {
 		return err
 	}
-	return validateSQLIdentifier("queue status table", s.statusTable)
-}
-
-func validateSQLIdentifier(label, value string) error {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return fmt.Errorf("%s identifier required", label)
-	}
-	parts := strings.Split(value, ".")
-	for _, part := range parts {
-		if !isSQLIdentifierPart(part) {
-			return fmt.Errorf("invalid %s identifier %q", label, value)
-		}
-	}
-	return nil
-}
-
-func isSQLIdentifierPart(part string) bool {
-	if part == "" {
-		return false
-	}
-	for idx := 0; idx < len(part); idx++ {
-		ch := part[idx]
-		isLetter := (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
-		isDigit := ch >= '0' && ch <= '9'
-		if idx == 0 {
-			if !isLetter && ch != '_' {
-				return false
-			}
-			continue
-		}
-		if !isLetter && !isDigit && ch != '_' {
-			return false
-		}
-	}
-	return true
+	return sqlutil.ValidateIdentifier("queue status table", s.statusTable)
 }
