@@ -60,23 +60,23 @@ func (p DefaultRetryPolicy) Decide(attempt int, err error) queue.NackOptions {
 	if errors.As(err, &terminal) && terminal.NonRetryable() {
 		reason = terminal.NonRetryableReason()
 		return queue.NackOptions{
-			DeadLetter: true,
-			Reason:     reason,
+			Disposition: queue.NackDispositionDeadLetter,
+			Reason:      reason,
 		}
 	}
 
 	if attempt >= maxAttempts {
 		return queue.NackOptions{
-			DeadLetter: true,
-			Reason:     reason,
+			Disposition: queue.NackDispositionDeadLetter,
+			Reason:      reason,
 		}
 	}
 
 	delay := computeBackoffDelay(attempt, p.Backoff)
 	return queue.NackOptions{
-		Delay:   delay,
-		Requeue: true,
-		Reason:  reason,
+		Disposition: queue.NackDispositionRetry,
+		Delay:       delay,
+		Reason:      reason,
 	}
 }
 
