@@ -56,11 +56,20 @@ type LeaseExtender interface {
 
 // NackOptions controls retry and DLQ behavior when nacking a message.
 type NackOptions struct {
-	Delay      time.Duration
-	Requeue    bool
-	DeadLetter bool
-	Reason     string
+	Disposition NackDisposition
+	Delay       time.Duration
+	Reason      string
 }
+
+// NackDisposition defines terminal/retry outcomes for nacked deliveries.
+type NackDisposition string
+
+const (
+	NackDispositionRetry      NackDisposition = "retry"
+	NackDispositionDeadLetter NackDisposition = "dead_letter"
+	NackDispositionFailed     NackDisposition = "failed"
+	NackDispositionCanceled   NackDisposition = "canceled"
+)
 
 // DispatchState defines queue dispatch lifecycle states exposed by status readers.
 type DispatchState string
@@ -75,7 +84,7 @@ const (
 	DispatchStateSucceeded  DispatchState = "succeeded"
 )
 
-// DispatchStatus represents the current inferred queue lifecycle state.
+// DispatchStatus represents the current durable queue lifecycle state.
 type DispatchStatus struct {
 	DispatchID     string
 	State          DispatchState
@@ -84,7 +93,6 @@ type DispatchStatus struct {
 	UpdatedAt      *time.Time
 	NextRunAt      *time.Time
 	TerminalReason string
-	Inferred       bool
 }
 
 // DispatchStatusReader resolves queue lifecycle state by dispatch id.
