@@ -16,8 +16,10 @@ func TestStorageOutboxAdapterClaimsAcrossWorkers(t *testing.T) {
 	storage := newOutboxMemoryStorage(clock.Now)
 	adapter := NewStorageOutboxAdapter(storage, WithOutboxClock(clock.Now))
 
-	require.NoError(t, storage.Enqueue(context.Background(), &job.ExecutionMessage{JobID: "job-1", ScriptPath: "/tmp/job-1"}))
-	require.NoError(t, storage.Enqueue(context.Background(), &job.ExecutionMessage{JobID: "job-2", ScriptPath: "/tmp/job-2"}))
+	_, err := storage.Enqueue(context.Background(), &job.ExecutionMessage{JobID: "job-1", ScriptPath: "/tmp/job-1"})
+	require.NoError(t, err)
+	_, err = storage.Enqueue(context.Background(), &job.ExecutionMessage{JobID: "job-2", ScriptPath: "/tmp/job-2"})
+	require.NoError(t, err)
 
 	claimedA, err := adapter.ClaimPending(context.Background(), "worker-a", 1, 30*time.Second)
 	require.NoError(t, err)
@@ -43,7 +45,8 @@ func TestStorageOutboxAdapterMarkFailedSchedulesRetryMetadata(t *testing.T) {
 	storage := newOutboxMemoryStorage(clock.Now)
 	adapter := NewStorageOutboxAdapter(storage, WithOutboxClock(clock.Now))
 
-	require.NoError(t, storage.Enqueue(context.Background(), &job.ExecutionMessage{JobID: "job", ScriptPath: "/tmp/job"}))
+	_, err := storage.Enqueue(context.Background(), &job.ExecutionMessage{JobID: "job", ScriptPath: "/tmp/job"})
+	require.NoError(t, err)
 
 	claimed, err := adapter.ClaimPending(context.Background(), "worker-a", 1, 30*time.Second)
 	require.NoError(t, err)
@@ -116,9 +119,9 @@ func newOutboxMemoryStorage(now func() time.Time) *outboxMemoryStorage {
 	}
 }
 
-func (s *outboxMemoryStorage) Enqueue(_ context.Context, msg *job.ExecutionMessage) error {
+func (s *outboxMemoryStorage) Enqueue(_ context.Context, msg *job.ExecutionMessage) (EnqueueReceipt, error) {
 	if msg == nil {
-		return fmt.Errorf("message required")
+		return EnqueueReceipt{}, fmt.Errorf("message required")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -130,7 +133,10 @@ func (s *outboxMemoryStorage) Enqueue(_ context.Context, msg *job.ExecutionMessa
 		available: now,
 		createdAt: now,
 	})
-	return nil
+	return EnqueueReceipt{
+		DispatchID: id,
+		EnqueuedAt: now,
+	}, nil
 }
 
 func (s *outboxMemoryStorage) Dequeue(_ context.Context) (*job.ExecutionMessage, Receipt, error) {

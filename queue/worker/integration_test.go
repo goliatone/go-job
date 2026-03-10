@@ -66,7 +66,8 @@ func TestQueueIntegrationStatusAndDownload(t *testing.T) {
 		ScriptPath: task.path,
 		Parameters: map[string]any{"export_id": exportID},
 	}
-	require.NoError(t, adapter.Enqueue(ctx, msg))
+	_, err := adapter.Enqueue(ctx, msg)
+	require.NoError(t, err)
 
 	select {
 	case <-done:
@@ -133,8 +134,10 @@ func TestQueueIntegrationIdempotencyDropAcks(t *testing.T) {
 		IdempotencyKey: "export-dup",
 		DedupPolicy:    job.DedupPolicyDrop,
 	}
-	require.NoError(t, adapter.Enqueue(ctx, msg))
-	require.NoError(t, adapter.Enqueue(ctx, msg))
+	_, err := adapter.Enqueue(ctx, msg)
+	require.NoError(t, err)
+	_, err = adapter.Enqueue(ctx, msg)
+	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
 		return atomic.LoadInt32(&successes) == 2
@@ -204,8 +207,10 @@ func TestQueueIntegrationSharedIdempotencyDropsDuplicateAcrossWorkers(t *testing
 		IdempotencyKey: "shared-dup",
 		DedupPolicy:    job.DedupPolicyDrop,
 	}
-	require.NoError(t, adapter.Enqueue(ctx, msg))
-	require.NoError(t, adapter.Enqueue(ctx, msg))
+	_, err := adapter.Enqueue(ctx, msg)
+	require.NoError(t, err)
+	_, err = adapter.Enqueue(ctx, msg)
+	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
 		return atomic.LoadInt32(&successCount) == 2
@@ -262,14 +267,16 @@ func TestQueueIntegrationManualReplayDropsWithSharedIdempotency(t *testing.T) {
 		IdempotencyKey: "manual-replay",
 		DedupPolicy:    job.DedupPolicyDrop,
 	}
-	require.NoError(t, adapter.Enqueue(ctx, msg))
+	_, err := adapter.Enqueue(ctx, msg)
+	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
 		return atomic.LoadInt32(&successCount) == 1
 	}, 2*time.Second, 10*time.Millisecond)
 	require.Equal(t, int32(1), atomic.LoadInt32(&execCount))
 
-	require.NoError(t, adapter.Enqueue(ctx, msg))
+	_, err = adapter.Enqueue(ctx, msg)
+	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
 		return atomic.LoadInt32(&successCount) == 2
@@ -321,7 +328,8 @@ func TestQueueIntegrationRetryAndDLQ(t *testing.T) {
 	})
 
 	msg := &job.ExecutionMessage{JobID: task.id, ScriptPath: task.path}
-	require.NoError(t, adapter.Enqueue(ctx, msg))
+	_, err := adapter.Enqueue(ctx, msg)
+	require.NoError(t, err)
 
 	select {
 	case <-attempts:
@@ -393,7 +401,8 @@ func TestQueueIntegrationStaleResumeTerminalErrorGoesToDLQWithoutRetry(t *testin
 		_ = worker.Stop(context.Background())
 	})
 
-	require.NoError(t, adapter.Enqueue(ctx, &job.ExecutionMessage{JobID: task.id, ScriptPath: task.path}))
+	_, err := adapter.Enqueue(ctx, &job.ExecutionMessage{JobID: task.id, ScriptPath: task.path})
+	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
 		return client.ListLen("queue:dlq") == 1

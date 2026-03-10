@@ -102,6 +102,21 @@ func TestEnqueueAtAndAfterWithOptionsReturnReceipts(t *testing.T) {
 	require.Equal(t, 1, enqueuer.enqueueAfterCalls)
 }
 
+func TestEnqueueAtWithOptionsRejectsPastRunAt(t *testing.T) {
+	enqueuer := newRecordingEnqueuer()
+	past := time.Now().UTC().Add(-1 * time.Minute)
+
+	_, err := EnqueueAtWithOptions(context.Background(), enqueuer, nil, "cmd.export", map[string]any{"id": "1"}, past, EnqueueOptions{})
+	require.Error(t, err)
+}
+
+func TestEnqueueAfterWithOptionsRejectsNegativeDelay(t *testing.T) {
+	enqueuer := newRecordingEnqueuer()
+
+	_, err := EnqueueAfterWithOptions(context.Background(), enqueuer, nil, "cmd.export", map[string]any{"id": "1"}, -1*time.Second, EnqueueOptions{})
+	require.Error(t, err)
+}
+
 func TestEnqueueWithOptionsDedupDrop(t *testing.T) {
 	enqueuer := newRecordingEnqueuer()
 	store := newMemoryDedupStore()
@@ -195,12 +210,7 @@ func newRecordingEnqueuer() *recordingEnqueuer {
 	return &recordingEnqueuer{}
 }
 
-func (e *recordingEnqueuer) Enqueue(_ context.Context, msg *job.ExecutionMessage) error {
-	_, err := e.EnqueueWithReceipt(context.Background(), msg)
-	return err
-}
-
-func (e *recordingEnqueuer) EnqueueWithReceipt(_ context.Context, msg *job.ExecutionMessage) (queue.EnqueueReceipt, error) {
+func (e *recordingEnqueuer) Enqueue(_ context.Context, msg *job.ExecutionMessage) (queue.EnqueueReceipt, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.enqueueCalls++
@@ -212,12 +222,7 @@ func (e *recordingEnqueuer) EnqueueWithReceipt(_ context.Context, msg *job.Execu
 	}, nil
 }
 
-func (e *recordingEnqueuer) EnqueueAt(_ context.Context, msg *job.ExecutionMessage, at time.Time) error {
-	_, err := e.EnqueueAtWithReceipt(context.Background(), msg, at)
-	return err
-}
-
-func (e *recordingEnqueuer) EnqueueAtWithReceipt(_ context.Context, msg *job.ExecutionMessage, at time.Time) (queue.EnqueueReceipt, error) {
+func (e *recordingEnqueuer) EnqueueAt(_ context.Context, msg *job.ExecutionMessage, at time.Time) (queue.EnqueueReceipt, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.enqueueAtCalls++
@@ -229,12 +234,7 @@ func (e *recordingEnqueuer) EnqueueAtWithReceipt(_ context.Context, msg *job.Exe
 	}, nil
 }
 
-func (e *recordingEnqueuer) EnqueueAfter(_ context.Context, msg *job.ExecutionMessage, delay time.Duration) error {
-	_, err := e.EnqueueAfterWithReceipt(context.Background(), msg, delay)
-	return err
-}
-
-func (e *recordingEnqueuer) EnqueueAfterWithReceipt(_ context.Context, msg *job.ExecutionMessage, _ time.Duration) (queue.EnqueueReceipt, error) {
+func (e *recordingEnqueuer) EnqueueAfter(_ context.Context, msg *job.ExecutionMessage, _ time.Duration) (queue.EnqueueReceipt, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.enqueueAfterCalls++

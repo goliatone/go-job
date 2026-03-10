@@ -23,7 +23,8 @@ func TestStorageEnqueueDequeueAck(t *testing.T) {
 	)
 
 	msg := &job.ExecutionMessage{JobID: "export", ScriptPath: "/tmp/export"}
-	require.NoError(t, storage.Enqueue(context.Background(), msg))
+	_, err := storage.Enqueue(context.Background(), msg)
+	require.NoError(t, err)
 
 	out, receipt, err := storage.Dequeue(context.Background())
 	require.NoError(t, err)
@@ -49,7 +50,7 @@ func TestAdapterEnqueueReceiptsAndDispatchStatusLifecycle(t *testing.T) {
 	ctx := context.Background()
 
 	msg := &job.ExecutionMessage{JobID: "export", ScriptPath: "/tmp/export"}
-	receipt, err := adapter.EnqueueWithReceipt(ctx, msg)
+	receipt, err := adapter.Enqueue(ctx, msg)
 	require.NoError(t, err)
 	require.NotEmpty(t, receipt.DispatchID)
 	require.False(t, receipt.EnqueuedAt.IsZero())
@@ -90,7 +91,7 @@ func TestAdapterEnqueueReceiptsAndDispatchStatusLifecycle(t *testing.T) {
 	assert.Equal(t, queue.DispatchStateDeadLetter, status.State)
 	assert.Equal(t, "fatal", status.TerminalReason)
 
-	receipt2, err := adapter.EnqueueWithReceipt(ctx, msg)
+	receipt2, err := adapter.Enqueue(ctx, msg)
 	require.NoError(t, err)
 	delivery2, err := adapter.Dequeue(ctx)
 	require.NoError(t, err)
@@ -115,13 +116,19 @@ func TestAdapterScheduledReceiptVariants(t *testing.T) {
 	adapter := NewAdapter(storage)
 	msg := &job.ExecutionMessage{JobID: "export", ScriptPath: "/tmp/export"}
 
-	r1, err := adapter.EnqueueAtWithReceipt(context.Background(), msg, clock.Now().Add(1*time.Minute))
+	r1, err := adapter.EnqueueAt(context.Background(), msg, clock.Now().Add(1*time.Minute))
 	require.NoError(t, err)
 	require.NotEmpty(t, r1.DispatchID)
 
-	r2, err := adapter.EnqueueAfterWithReceipt(context.Background(), msg, 5*time.Second)
+	r2, err := adapter.EnqueueAfter(context.Background(), msg, 5*time.Second)
 	require.NoError(t, err)
 	require.NotEmpty(t, r2.DispatchID)
+}
+
+func TestAdapterGetDispatchStatusUnsupported(t *testing.T) {
+	adapter := NewAdapter(stubStorageNoStatus{})
+	_, err := adapter.GetDispatchStatus(context.Background(), "dispatch-1")
+	require.ErrorIs(t, err, queue.ErrDispatchStatusUnsupported)
 }
 
 func TestStorageNackDelayedRetry(t *testing.T) {
@@ -135,7 +142,8 @@ func TestStorageNackDelayedRetry(t *testing.T) {
 	)
 
 	msg := &job.ExecutionMessage{JobID: "export", ScriptPath: "/tmp/export"}
-	require.NoError(t, storage.Enqueue(context.Background(), msg))
+	_, err := storage.Enqueue(context.Background(), msg)
+	require.NoError(t, err)
 
 	_, receipt, err := storage.Dequeue(context.Background())
 	require.NoError(t, err)
@@ -172,7 +180,8 @@ func TestStorageVisibilityTimeoutRequeues(t *testing.T) {
 	)
 
 	msg := &job.ExecutionMessage{JobID: "export", ScriptPath: "/tmp/export"}
-	require.NoError(t, storage.Enqueue(context.Background(), msg))
+	_, err := storage.Enqueue(context.Background(), msg)
+	require.NoError(t, err)
 
 	_, receipt, err := storage.Dequeue(context.Background())
 	require.NoError(t, err)
@@ -197,7 +206,8 @@ func TestStorageDeadLetters(t *testing.T) {
 	)
 
 	msg := &job.ExecutionMessage{JobID: "export", ScriptPath: "/tmp/export"}
-	require.NoError(t, storage.Enqueue(context.Background(), msg))
+	_, err := storage.Enqueue(context.Background(), msg)
+	require.NoError(t, err)
 
 	_, receipt, err := storage.Dequeue(context.Background())
 	require.NoError(t, err)
@@ -223,7 +233,8 @@ func TestStorageEnqueueAt(t *testing.T) {
 	)
 
 	msg := &job.ExecutionMessage{JobID: "export", ScriptPath: "/tmp/export"}
-	require.NoError(t, storage.EnqueueAt(context.Background(), msg, clock.Now().Add(10*time.Second)))
+	_, err := storage.EnqueueAt(context.Background(), msg, clock.Now().Add(10*time.Second))
+	require.NoError(t, err)
 
 	none, _, err := storage.Dequeue(context.Background())
 	require.NoError(t, err)
@@ -247,7 +258,8 @@ func TestStorageExtendLease(t *testing.T) {
 	)
 
 	msg := &job.ExecutionMessage{JobID: "export", ScriptPath: "/tmp/export"}
-	require.NoError(t, storage.Enqueue(context.Background(), msg))
+	_, err := storage.Enqueue(context.Background(), msg)
+	require.NoError(t, err)
 
 	_, receipt, err := storage.Dequeue(context.Background())
 	require.NoError(t, err)
@@ -453,6 +465,24 @@ func sortZItems(items []ZItem) {
 			items[j], items[j-1] = items[j-1], items[j]
 		}
 	}
+}
+
+type stubStorageNoStatus struct{}
+
+func (stubStorageNoStatus) Enqueue(context.Context, *job.ExecutionMessage) (queue.EnqueueReceipt, error) {
+	return queue.EnqueueReceipt{}, nil
+}
+
+func (stubStorageNoStatus) Dequeue(context.Context) (*job.ExecutionMessage, queue.Receipt, error) {
+	return nil, queue.Receipt{}, nil
+}
+
+func (stubStorageNoStatus) Ack(context.Context, queue.Receipt) error {
+	return nil
+}
+
+func (stubStorageNoStatus) Nack(context.Context, queue.Receipt, queue.NackOptions) error {
+	return nil
 }
 
 func sequence(values ...string) func() string {

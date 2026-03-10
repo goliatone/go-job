@@ -6,14 +6,15 @@ import (
 	"time"
 
 	job "github.com/goliatone/go-job"
+	"github.com/goliatone/go-job/queue"
 	"github.com/stretchr/testify/require"
 )
 
 func TestEnqueueAtUsesScheduledEnqueuer(t *testing.T) {
 	enqueuer := &captureScheduledEnqueuer{}
-	at := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	at := time.Now().UTC().Add(1 * time.Minute)
 
-	err := EnqueueAt(context.Background(), enqueuer, nil, "cmd.export", map[string]any{"id": "123"}, at)
+	_, err := EnqueueAt(context.Background(), enqueuer, nil, "cmd.export", map[string]any{"id": "123"}, at)
 	require.NoError(t, err)
 	require.Equal(t, "cmd.export", enqueuer.msg.JobID)
 	require.Equal(t, "cmd.export", enqueuer.msg.ScriptPath)
@@ -23,7 +24,7 @@ func TestEnqueueAtUsesScheduledEnqueuer(t *testing.T) {
 func TestEnqueueAfterUsesScheduledEnqueuer(t *testing.T) {
 	enqueuer := &captureScheduledEnqueuer{}
 
-	err := EnqueueAfter(context.Background(), enqueuer, nil, "cmd.export", map[string]any{"id": "123"}, 5*time.Second)
+	_, err := EnqueueAfter(context.Background(), enqueuer, nil, "cmd.export", map[string]any{"id": "123"}, 5*time.Second)
 	require.NoError(t, err)
 	require.Equal(t, "cmd.export", enqueuer.msg.JobID)
 	require.Equal(t, "cmd.export", enqueuer.msg.ScriptPath)
@@ -36,19 +37,19 @@ type captureScheduledEnqueuer struct {
 	delay time.Duration
 }
 
-func (e *captureScheduledEnqueuer) Enqueue(_ context.Context, msg *job.ExecutionMessage) error {
+func (e *captureScheduledEnqueuer) Enqueue(_ context.Context, msg *job.ExecutionMessage) (queue.EnqueueReceipt, error) {
 	e.msg = msg
-	return nil
+	return queue.EnqueueReceipt{}, nil
 }
 
-func (e *captureScheduledEnqueuer) EnqueueAt(_ context.Context, msg *job.ExecutionMessage, at time.Time) error {
+func (e *captureScheduledEnqueuer) EnqueueAt(_ context.Context, msg *job.ExecutionMessage, at time.Time) (queue.EnqueueReceipt, error) {
 	e.msg = msg
 	e.at = at
-	return nil
+	return queue.EnqueueReceipt{}, nil
 }
 
-func (e *captureScheduledEnqueuer) EnqueueAfter(_ context.Context, msg *job.ExecutionMessage, delay time.Duration) error {
+func (e *captureScheduledEnqueuer) EnqueueAfter(_ context.Context, msg *job.ExecutionMessage, delay time.Duration) (queue.EnqueueReceipt, error) {
 	e.msg = msg
 	e.delay = delay
-	return nil
+	return queue.EnqueueReceipt{}, nil
 }
