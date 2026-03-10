@@ -22,6 +22,7 @@ type Client interface {
 	ZAdd(ctx context.Context, key string, score float64, member string) error
 	ZRem(ctx context.Context, key string, members ...string) error
 	ZRangeByScore(ctx context.Context, key string, max float64, limit int64) ([]ZItem, error)
+	Eval(ctx context.Context, script string, keys []string, args ...any) (any, error)
 	Expire(ctx context.Context, key string, ttl time.Duration) error
 	Del(ctx context.Context, keys ...string) error
 }
